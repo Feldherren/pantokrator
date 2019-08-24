@@ -141,7 +141,7 @@ async def check_current_game():
 					if watcher.dm_channel is None:
 						await watcher.create_dm()
 					dm = watcher.dm_channel
-					await watcher.send(current_game + ' just generated a new turn!')
+					await dm.send(current_game + ' just generated a new turn!')
 				current_turn = game_info['turn']
 				
 @bot.command()
