@@ -137,7 +137,7 @@ async def check_current_game():
 			if game_info['turn'] != current_turn:
 				print("It is a new turn!")
 				for watcher in watchers:
-					print("Messaging " + watcher)
+					#print("Messaging " + watcher)
 					if watcher.dm_channel is None:
 						await watcher.create_dm()
 					dm = watcher.dm_channel
