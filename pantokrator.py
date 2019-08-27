@@ -17,8 +17,9 @@ bot = commands.Bot(command_prefix=SYMBOL)
 description = '''Pantokrator, a Dominions 5 bot for raspberry pi and python.'''
 
 SAVEDIR = '/home/pi/.dominions5/savedgames'
+DATAFILE = 'games'
 global games
-games = {}
+games = {'current_game':None}
 # {current_game:"whatever",late-era-wenching:{current_turn:6, watchers:()}}
 global current_game
 current_game = None
@@ -44,9 +45,7 @@ nations_late = {'arcoscephale':80, 'pythium':81, 'lemuria':82, 'man':83, 'ulm':8
 
 @bot.command(hidden=True)
 async def shutdown(ctx):
-	global games
-	filename = 'games'
-	outfile = open(filename,'wb')
+	outfile = open(DATAFILE,'wb')
 	pickle.dump(games, outfile)
 	await ctx.send("All data saved, shutting down.")
 	sys.exit()
@@ -106,6 +105,7 @@ async def unwatch(ctx):
 	else:
 		await ctx.send("No game set; please set a game using !setgame first")
 
+# let people set it for arbitrary game, instead of just current
 @bot.command(brief="Sets autohost interval used for current game (usage: ?autohost hours).")
 async def autohost(ctx, hours):
 	global games
@@ -165,7 +165,6 @@ def parsedatafile(datafile):
 @tasks.loop(seconds=10.0)
 async def check_current_game():
 	print("Checking...")
-	global autohost_interval
 	global games
 	if games[games['current_game']] is not None:
 		# print("Checking " + current_game)
@@ -180,7 +179,7 @@ async def check_current_game():
 			if game_info['turn'] != games[games['current_game']]['current_turn']:
 				print("It is a new turn!")
 				# TODO: record time here
-				games[games['current_game']]['next_autohost_time'] = datetime.now() + timedelta(hours=autohost_interval)
+				games[games['current_game']]['next_autohost_time'] = datetime.now() + timedelta(hours=games[games['current_game']]['autohost_interval'])
 				for watcher in games[games['current_game']]['watchers']:
 					#print("Messaging " + watcher)
 					if watcher.dm_channel is None:
@@ -191,8 +190,6 @@ async def check_current_game():
 				
 @bot.command(brief="Outputs game status, including current turn and nation status (usage: ?status [optional:gamename])")
 async def status(ctx, arg=None):
-	global current_game
-	global next_autohost_time
 	global games
 	game = None
 	if arg is not None:
@@ -243,5 +240,7 @@ async def status(ctx, arg=None):
 			output = '\n'.join(game_details)
 			await ctx.send(output)
 			
+if os.path.exists(DATAFILE):
+	games = pickle.load(DATAFILE)
 check_current_game.start()
 bot.run(TOKEN, bot=True)
