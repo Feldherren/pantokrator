@@ -3,6 +3,7 @@ from discord.ext import tasks, commands
 import os
 import re
 import asyncio
+from datetime import datetime, timedelta
 
 TOKEN = ''
 SYMBOL = '?'
@@ -18,6 +19,10 @@ global current_game
 current_game = None
 global current_turn
 current_turn = None
+global next_autohost_time
+next_autohost_time = None
+global autohost_interval
+autohost_interval = 24 # hours
 
 #watching for updates is only for the current game, currently
 global watchers
@@ -32,7 +37,7 @@ nations_mid = {'arcoscephale':43, 'ermor':44, 'sceleria':45, 'pythium':46, 'man'
 nations_late_ids = [80,81,82,83,84,85,86,87,89,90,91,92,93,94,95,96,97,98,99,100,101,102,106,107,108]
 nations_late = {'arcoscephale':80, 'pythium':81, 'lemuria':82, 'man':83, 'ulm':84, 'marignon':85, 'mictlan':86, "t'ien chi'":87, "t'ien":87, 'tien chi':87, 'tien':87, 'jomon':89, 'agartha':90, 'abysia':91, 'caelum':92, "c'tis":93, 'ctis':93, 'pangaea':94, 'midgard':95, 'utgard':96, 'bogarus':97, 'patala':98, 'gath':99, 'ragha':100, 'xibalba':101, 'phlegra':102, 'atlantis':106, "r'lyeh":107, 'rlyeh':107, 'erytheia':108}
 
-@bot.command()
+@bot.command(brief="Lists detected games on Pi.")
 async def listgames(ctx):
 	games = [name for name in os.listdir(SAVEDIR) if os.path.isdir(os.path.join(SAVEDIR, name))]
 	if len(games) >= 1:
@@ -41,11 +46,12 @@ async def listgames(ctx):
 		game_list = 'No games found; start one!'
 	await ctx.send(game_list)
 	
-@bot.command()
+@bot.command(brief="Sets currently-running game.")
 async def setgame(ctx, name=None):
 	global current_game
 	global watchers
 	global current_turn
+	global next_autohost_time
 	if name is not None:
 		game_name = "".join(c for c in name if c.isalnum() or c in KEEPCHARACTERS).rstrip()
 		if os.path.exists(os.path.join(SAVEDIR, game_name)):
@@ -57,13 +63,14 @@ async def setgame(ctx, name=None):
 			else:
 				current_turn = '?'
 			watchers = []
+			next_autohost_time = None
 			await ctx.send("Now watching " + game_name + " and all watchers have been removed.")
 		else:
 			await ctx.send("No game called " + game_name + " found")
 	else:
 		await ctx.send("No game specified; please specify a game next time")
 
-@bot.command()
+@bot.command(brief="Sets user as watching currently-running game.")
 async def watch(ctx):
 	global watchers
 	global current_game
@@ -75,6 +82,27 @@ async def watch(ctx):
 			await ctx.send("You are already watching the current game, " + current_game + ".")
 	else:
 		await ctx.send("No game set; please set a game using !setgame first")
+
+@bot.command(brief="Removes user from watching list on currently-running game.")
+async def unwatch(ctx):
+	global watchers
+	global current_game
+	if current_game is not None:
+		if ctx.author in watchers:
+			watchers.remove(ctx.author)
+			await ctx.send("You have stopped watching the current game, " + current_game + ", and will not receive updates whenever a new turn processes.")
+		else:
+			await ctx.send("You aren't watching the current game, " + current_game + ".")
+	else:
+		await ctx.send("No game set; please set a game using !setgame first")
+
+@bot.command(brief="Sets autohost interval used for current game.")
+async def autohost(ctx, hours):
+	global autohost_interval
+	if hours is not None:
+		autohost_interval = int(hours)
+	else:
+		await ctx.send("Please supply a valid autohost period in hours as an integer (default: 24)")
 
 p_gamename = re.compile("Status for '(.+)'", re.IGNORECASE)
 p_gameinfo = re.compile('turn (\d+), era (\d), mods (\d+), turnlimit (\d+)')
@@ -117,6 +145,12 @@ def parsedatafile(datafile):
 			# await ctx.send(watcher)
 	# else:
 		# await ctx.send("no watchers")
+		
+# function TODO:
+# watching? function to check if you're watching
+# function to close the bot down cleanly, save watch/setgame status
+# also load the status later
+# need function to clear this, too, if this is implemented
 	
 @tasks.loop(seconds=10.0)
 async def check_current_game():
@@ -124,6 +158,8 @@ async def check_current_game():
 	global current_game
 	global current_turn
 	global watchers
+	global next_autohost_time
+	global autohost_interval
 	if current_game is not None:
 		# print("Checking " + current_game)
 		statusdump = os.path.join(SAVEDIR, current_game, "statusdump.txt")
@@ -136,6 +172,8 @@ async def check_current_game():
 				# print("the turns match")
 			if game_info['turn'] != current_turn:
 				print("It is a new turn!")
+				# TODO: record time here
+				next_autohost_time = datetime.now() + timedelta(hours=autohost_interval)
 				for watcher in watchers:
 					#print("Messaging " + watcher)
 					if watcher.dm_channel is None:
@@ -144,9 +182,10 @@ async def check_current_game():
 					await dm.send(current_game + ' just generated a new turn!')
 				current_turn = game_info['turn']
 				
-@bot.command()
+@bot.command(brief="Outputs game status, including current turn and nation status (optional: game name; assumes current game if not provided)")
 async def status(ctx, arg=None):
 	global current_game
+	global next_autohost_time
 	game = None
 	if arg is not None:
 		game_name = "".join(c for c in arg if c.isalnum() or c in KEEPCHARACTERS).rstrip()
@@ -172,6 +211,12 @@ async def status(ctx, arg=None):
 			season_string = seasons[int(game_info['turn'])%12]
 			turn = 'Turn ' + game_info['turn'] + ' (Year ' + year + ', ' + season_string + ')'
 			game_details = ['**'+game+'**', '*'+turn+'*']
+			if game == current_game:
+				time_left = None
+				if next_autohost_time is not None:
+					time_left = str(next_autohost_time - datetime.now())
+					next_autohost_str = "Next turn in approximately: " + time_left
+					game_details.append(next_autohost_str)
 			# the below are 3, 4, 5 in result
 			# has not taken turn: 1 0 0
 			# mark as unfinished and exit: 1 0 1
