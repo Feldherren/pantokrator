@@ -5,10 +5,10 @@ import re
 import asyncio
 from datetime import datetime, timedelta
 import sys
-import pickle
+import dill
 
 TOKEN = ''
-SYMBOL = '?'
+SYMBOL = '!'
 KEEPCHARACTERS = ['_', '-']
 
 client = discord.Client()
@@ -20,18 +20,6 @@ SAVEDIR = '/home/pi/.dominions5/savedgames'
 DATAFILE = 'games'
 global games
 games = {'current_game':None}
-# {current_game:"whatever",late-era-wenching:{current_turn:6, watchers:()}}
-global current_game
-current_game = None
-global current_turn
-current_turn = None
-global next_autohost_time
-next_autohost_time = None
-global autohost_interval
-autohost_interval = 24 # hours
-
-#watching for updates is only for the current game, currently
-global watchers
 
 seasons = {0: 'early spring', 1: 'spring', 2:'late spring', 3:'early summer', 4:'summer', 5:'late summer', 6:'early fall', 7:'fall', 8:'late fall', 9:'early winter', 10:'winter', 11:'late winter'}
 eras = {'early':0, 'middle':1, 'mid':1, 'late':2}
@@ -43,11 +31,22 @@ nations_mid = {'arcoscephale':43, 'ermor':44, 'sceleria':45, 'pythium':46, 'man'
 nations_late_ids = [80,81,82,83,84,85,86,87,89,90,91,92,93,94,95,96,97,98,99,100,101,102,106,107,108]
 nations_late = {'arcoscephale':80, 'pythium':81, 'lemuria':82, 'man':83, 'ulm':84, 'marignon':85, 'mictlan':86, "t'ien chi'":87, "t'ien":87, 'tien chi':87, 'tien':87, 'jomon':89, 'agartha':90, 'abysia':91, 'caelum':92, "c'tis":93, 'ctis':93, 'pangaea':94, 'midgard':95, 'utgard':96, 'bogarus':97, 'patala':98, 'gath':99, 'ragha':100, 'xibalba':101, 'phlegra':102, 'atlantis':106, "r'lyeh":107, 'rlyeh':107, 'erytheia':108}
 
-@bot.command(hidden=True)
+def save_data(f):
+	global games
+	with open(f, 'wb') as outfile:
+		dill.dump(games, outfile)
+		
+def load_data(f):
+	global games
+	if os.path.exists(f):
+		with open(f, 'rb') as infile:
+			games = dill.load(infile)
+
+@bot.command()
 async def shutdown(ctx):
-	outfile = open(DATAFILE,'wb')
-	pickle.dump(games, outfile)
+	save_data(DATAFILE)
 	await ctx.send("All data saved, shutting down.")
+	await client.close()
 	sys.exit()
 
 @bot.command(brief="Lists detected games on Pi.")
@@ -72,8 +71,13 @@ async def setgame(ctx, name=None):
 				current_turn = game_info['turn']
 			else:
 				current_turn = '?'
-			games[games['current_game']] = {'turn':current_turn, 'watchers':[],'autohost_interval'=None,'next_autohost_time':None}
+			games[games['current_game']] = {'turn':current_turn, 'next_autohost_time':None}
+			if 'autohost_interval' not in games[games['current_game']]:
+				games[games['current_game']]['autohost_interval'] = None
+			if 'watchers' not in games[games['current_game']]:
+				games[games['current_game']]['watchers'] = []
 			await ctx.send("Now watching " + games['current_game'])
+			save_data(DATAFILE)
 		else:
 			await ctx.send("No game called " + game_name + " found")
 	else:
@@ -82,12 +86,14 @@ async def setgame(ctx, name=None):
 # TODO: allow setting watch on other games?
 @bot.command(brief="Sets user as watching currently-running game.")
 async def watch(ctx):
-	global watchers
 	global games
-	if games[games['current_game']] is not None:
-		if ctx.author not in games[games['current_game']]['watchers']:
-			games[games['current_game']]['watchers'].append(ctx.author)
+	if games['current_game'] in games:
+		if 'watchers' not in games[games['current_game']]:
+			games[games['current_game']]['watchers'] = []
+		if ctx.author.id not in games[games['current_game']]['watchers']:
+			games[games['current_game']]['watchers'].append(ctx.author.id)
 			await ctx.send("You are now watching the current game, " + games['current_game'] + ", and will receive a DM whenever a new turn processes.")
+			save_data(DATAFILE)
 		else:
 			await ctx.send("You are already watching the current game, " + games['current_game'] + ".")
 	else:
@@ -96,10 +102,13 @@ async def watch(ctx):
 @bot.command(brief="Removes user from watching list on currently-running game.")
 async def unwatch(ctx):
 	global games
-	if current_game is not None:
-		if ctx.author in games[games['current_game']]['watchers']:
-			games[games['current_game']]['watchers'].remove(ctx.author)
+	if games['current_game'] is not None:
+		if 'watchers' not in games[games['current_game']]:
+			games[games['current_game']]['watchers'] = []
+		if ctx.author.id in games[games['current_game']]['watchers']:
+			games[games['current_game']]['watchers'].remove(ctx.author.id)
 			await ctx.send("You have stopped watching the current game, " + games['current_game'] + ", and will not receive updates whenever a new turn processes.")
+			save_data(DATAFILE)
 		else:
 			await ctx.send("You aren't watching the current game, " + games['current_game'] + ".")
 	else:
@@ -111,6 +120,7 @@ async def autohost(ctx, hours):
 	global games
 	if hours is not None:
 		games[games['current_game']]['autohost_interval'] = int(hours)
+		save_data(DATAFILE)
 	else:
 		await ctx.send("Please supply a valid autohost period in hours as an integer")
 
@@ -157,18 +167,17 @@ def parsedatafile(datafile):
 		# await ctx.send("no watchers")
 		
 # function TODO:
-# watching? function to check if you're watching
-# function to close the bot down cleanly, save watch/setgame status
-# also load the status later
 # need function to clear this, too, if this is implemented
 	
+# TODO: MOAR TESTING
 @tasks.loop(seconds=10.0)
 async def check_current_game():
 	print("Checking...")
 	global games
-	if games[games['current_game']] is not None:
+	print(games['current_game'])
+	if games['current_game'] is not None:
 		# print("Checking " + current_game)
-		statusdump = os.path.join(SAVEDIR, games[games['current_game']], "statusdump.txt")
+		statusdump = os.path.join(SAVEDIR, games['current_game'], "statusdump.txt")
 		if os.path.exists(statusdump):
 			# print("Reading statusdump.txt")
 			game_info, nation_data = parsedatafile(statusdump)
@@ -176,17 +185,17 @@ async def check_current_game():
 			# print("current turn: " + current_turn)
 			# if game_info['turn'] == current_turn:
 				# print("the turns match")
-			if game_info['turn'] != games[games['current_game']]['current_turn']:
+			if game_info['turn'] != games[games['current_game']]['turn']:
 				print("It is a new turn!")
 				# TODO: record time here
 				games[games['current_game']]['next_autohost_time'] = datetime.now() + timedelta(hours=games[games['current_game']]['autohost_interval'])
 				for watcher in games[games['current_game']]['watchers']:
-					#print("Messaging " + watcher)
-					if watcher.dm_channel is None:
-						await watcher.create_dm()
-					dm = watcher.dm_channel
+					user = client.get_user(watcher)
+					if user.dm_channel is None:
+						await user.create_dm()
+					dm = user.dm_channel
 					await dm.send(games['current_game'] + ' just generated a new turn!')
-				games[games['current_game']]['current_turn'] = game_info['turn']
+				games[games['current_game']]['turn'] = game_info['turn']
 				
 @bot.command(brief="Outputs game status, including current turn and nation status (usage: ?status [optional:gamename])")
 async def status(ctx, arg=None):
@@ -240,7 +249,6 @@ async def status(ctx, arg=None):
 			output = '\n'.join(game_details)
 			await ctx.send(output)
 			
-if os.path.exists(DATAFILE):
-	games = pickle.load(DATAFILE)
+load_data(DATAFILE)
 check_current_game.start()
 bot.run(TOKEN, bot=True)
