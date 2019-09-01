@@ -151,18 +151,18 @@ def parsedatafile(datafile):
 			nation_status[n[7]] = n
 	return game_info, nation_status
 	
-@bot.command()
-async def test(ctx):
-	dm = None
-	id = ctx.author.id
-	print(id)
-	user = bot.get_user(id)
-	print(user)
-	if user.dm_channel is None:
-		await user.create_dm()
-	dm = user.dm_channel
+# @bot.command()
+# async def test(ctx):
+	# dm = None
+	# id = ctx.author.id
+	# print(id)
+	# user = bot.get_user(id)
+	# print(user)
+	# if user.dm_channel is None:
+		# await user.create_dm()
+	# dm = user.dm_channel
 	
-	await dm.send("Testing sending DMs via ID")
+	# await dm.send("Testing sending DMs via ID")
 	
 # @bot.command()
 # async def watchers(ctx):
