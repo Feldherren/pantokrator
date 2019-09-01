@@ -5,7 +5,7 @@ import re
 import asyncio
 from datetime import datetime, timedelta
 import sys
-import dill
+import dill # may be able to switch this back to pickle, but make sure everything works first
 
 TOKEN = ''
 SYMBOL = '!'
@@ -46,7 +46,7 @@ def load_data(f):
 async def shutdown(ctx):
 	save_data(DATAFILE)
 	await ctx.send("All data saved, shutting down.")
-	await client.close()
+	await bot.close()
 	sys.exit()
 
 @bot.command(brief="Lists detected games on Pi.")
@@ -84,14 +84,15 @@ async def setgame(ctx, name=None):
 		await ctx.send("No game specified; please specify a game next time")
 
 # TODO: allow setting watch on other games?
-@bot.command(brief="Sets user as watching currently-running game.")
+@bot.command(brief="Sets user as watching current game.")
 async def watch(ctx):
 	global games
 	if games['current_game'] in games:
 		if 'watchers' not in games[games['current_game']]:
 			games[games['current_game']]['watchers'] = []
-		if ctx.author.id not in games[games['current_game']]['watchers']:
-			games[games['current_game']]['watchers'].append(ctx.author.id)
+		user_id = ctx.author.id
+		if user_id not in games[games['current_game']]['watchers']:
+			games[games['current_game']]['watchers'].append(user_id)
 			await ctx.send("You are now watching the current game, " + games['current_game'] + ", and will receive a DM whenever a new turn processes.")
 			save_data(DATAFILE)
 		else:
@@ -99,14 +100,15 @@ async def watch(ctx):
 	else:
 		await ctx.send("No game set; please set a game using ?setgame first")
 
-@bot.command(brief="Removes user from watching list on currently-running game.")
+@bot.command(brief="Removes user from watching list on current game.")
 async def unwatch(ctx):
 	global games
 	if games['current_game'] is not None:
 		if 'watchers' not in games[games['current_game']]:
 			games[games['current_game']]['watchers'] = []
-		if ctx.author.id in games[games['current_game']]['watchers']:
-			games[games['current_game']]['watchers'].remove(ctx.author.id)
+		user_id = ctx.author.id
+		if user_id in games[games['current_game']]['watchers']:
+			games[games['current_game']]['watchers'].remove(user_id)
 			await ctx.send("You have stopped watching the current game, " + games['current_game'] + ", and will not receive updates whenever a new turn processes.")
 			save_data(DATAFILE)
 		else:
@@ -120,6 +122,7 @@ async def autohost(ctx, hours):
 	global games
 	if hours is not None:
 		games[games['current_game']]['autohost_interval'] = int(hours)
+		await ctx.send("Autohost interval is now set to " + hours + " hours.")
 		save_data(DATAFILE)
 	else:
 		await ctx.send("Please supply a valid autohost period in hours as an integer")
@@ -148,14 +151,18 @@ def parsedatafile(datafile):
 			nation_status[n[7]] = n
 	return game_info, nation_status
 	
-# @bot.command()
-# async def test(ctx):
-	# dm = None
-	# if ctx.author.dm_channel is None:
-		# await ctx.author.create_dm()
-	# dm = ctx.author.dm_channel
+@bot.command()
+async def test(ctx):
+	dm = None
+	id = ctx.author.id
+	print(id)
+	user = bot.get_user(id)
+	print(user)
+	if user.dm_channel is None:
+		await user.create_dm()
+	dm = user.dm_channel
 	
-	# await dm.send("Testing sending DMs")
+	await dm.send("Testing sending DMs via ID")
 	
 # @bot.command()
 # async def watchers(ctx):
@@ -179,22 +186,21 @@ async def check_current_game():
 		# print("Checking " + current_game)
 		statusdump = os.path.join(SAVEDIR, games['current_game'], "statusdump.txt")
 		if os.path.exists(statusdump):
-			# print("Reading statusdump.txt")
 			game_info, nation_data = parsedatafile(statusdump)
-			# print("statusdump.txt turn: " + game_info['turn'])
-			# print("current turn: " + current_turn)
-			# if game_info['turn'] == current_turn:
-				# print("the turns match")
 			if game_info['turn'] != games[games['current_game']]['turn']:
 				print("It is a new turn!")
-				# TODO: record time here
 				games[games['current_game']]['next_autohost_time'] = datetime.now() + timedelta(hours=games[games['current_game']]['autohost_interval'])
 				for watcher in games[games['current_game']]['watchers']:
-					user = client.get_user(watcher)
-					if user.dm_channel is None:
-						await user.create_dm()
-					dm = user.dm_channel
-					await dm.send(games['current_game'] + ' just generated a new turn!')
+					print(watcher)
+					user = bot.get_user(watcher)
+					print(user)
+					if user is not None:
+						if user.dm_channel is None:
+							await user.create_dm()
+						dm = user.dm_channel
+						await dm.send(games['current_game'] + ' just generated a new turn!')
+					else:
+						print("Error: User with ID " + str(id) + " not found")
 				games[games['current_game']]['turn'] = game_info['turn']
 				
 @bot.command(brief="Outputs game status, including current turn and nation status (usage: ?status [optional:gamename])")
