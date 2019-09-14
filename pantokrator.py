@@ -7,7 +7,16 @@ from datetime import datetime, timedelta
 import sys
 import pickle 
 
+# TODO: double check nested dicts are created where necessary
 # TODO: running and checking more than one game at once?
+# Need to set what games are tracked/watched by the BOT; track/untrack? activate/deactivate?
+# Need to make various commands require specifying name
+# Keep command to scan for games, but listgames only lists tracked/active games?
+# TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
+# TODO: means of setting/resetting turn estimate, in case I extend it
+# TODO: means of extending turn automatically? Going to want this limited to me, though
+# TODO: means of limiting the use of certain commands to me only; better than hiding it. Store the ID like I do for watching games.
+# TODO: means of marking someone as AI-controlled, since the bot can't read that
 
 TOKEN = ''
 SYMBOL = '?'
@@ -61,21 +70,23 @@ async def listgames(ctx):
 		game_list = 'No games found; start one!'
 	await ctx.send(game_list)
 
-@bot.command(brief="Sets currently-running game.", help="Sets currently-runnin game.")
+@bot.command(brief="Sets currently-running game.", help="Sets currently-running game.")
 async def setgame(ctx, name=None):
 	global games
 	if name is not None:
 		game_name = "".join(c for c in name if c.isalnum() or c in KEEPCHARACTERS).rstrip()
 		if os.path.exists(os.path.join(SAVEDIR, game_name)):
 			games['current_game'] = game_name
+			if game_name not in games.keys():
+				games[games['current_game']] = {}
 			statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
 			if os.path.exists(statusdump):
 				game_info, nation_status = parsedatafile(statusdump)
 				current_turn = game_info['turn'] # always thought it was a new turn, because this was a string; do strings compare well?
+				games[games['current_game']]['turn'] = current_turn
+				#games[games['current_game']]['next_autohost_time'] = None
 			else:
 				current_turn = '?'
-			games[games['current_game']]['turn'] = current_turn
-			#games[games['current_game']]['next_autohost_time'] = None
 			await ctx.send("Now watching " + games['current_game'])
 			save_data(DATAFILE)
 		else:
@@ -115,7 +126,7 @@ async def unwatch(ctx):
 		else:
 			await ctx.send("You aren't watching the current game, " + games['current_game'] + ".")
 	else:
-		await ctx.send("No game set; please set a game using !setgame first")
+		await ctx.send("No game set; please set a game using setgame first")
 		
 def get_nick_or_name(author):
 	name = author.name
@@ -124,12 +135,14 @@ def get_nick_or_name(author):
 			name = ctx.author.nick
 	return name
 		
-		
+# take basic discord name?
 # TODO: maybe require verifying nation exists?
 @bot.command(brief="Claim a nation for your own.", help="Claim a nation for yourself, in the current game. Note that this doesn't verify you entered a real nation, or something not already claimed.")
 async def claim(ctx, nation):
 	global games
 	if games['current_game'] in games:
+		if 'players' not in games[games['current_game']].keys():
+			games[games['current_game']]['players'] = {}
 		player = get_nick_or_name(ctx.author)
 		games[games['current_game']]['players'][nation] = player
 		await ctx.send(player + " has claimed the nation " + nation)
@@ -141,6 +154,8 @@ async def claim(ctx, nation):
 async def unclaim(ctx, nation):
 	global games
 	if games['current_game'] in games:
+		if 'players' not in games[games['current_game']].keys():
+			games[games['current_game']]['players'] = {}
 		player = get_nick_or_name(ctx.author)
 		if nation in games[games['current_game']]['players']:
 			if games[games['current_game']]['players'][nation] == player:
@@ -159,8 +174,9 @@ async def unclaim(ctx, nation):
 async def who(ctx):
 	global games
 	output = []
-	for nation in sorted(games[games['current_game']]['players']):
-		output.append(nation + ": " + games[games['current_game']]['players'][nation])
+	if 'players' in games[games['current_game']].keys():
+		for nation in sorted(games[games['current_game']]['players']):
+			output.append(nation + ": " + games[games['current_game']]['players'][nation])
 	if len(output) >= 1:
 		whois = "\n".join(output)
 		await ctx.send(whois)
@@ -179,13 +195,13 @@ async def autohost(ctx, hours):
 		await ctx.send("Please supply a valid autohost period in hours as an integer")
 
 p_gamename = re.compile("Status for '(.+)'", re.IGNORECASE)
-p_gameinfo = re.compile('turn (\d+), era (\d), mods (\d+), turnlimit (\d+)')
+p_gameinfo = re.compile('turn (-?\d+), era (\d), mods (\d+), turnlimit (\d+)')
 p_nationstatus = re.compile("Nation\s+(\d+)\s+(\d+)\s+(-?\d+)\s+(\d+)\s+(\d+)\s+([\w_]+)\s+([\w']+)\s+(.+)$")
 
-def parsedatafile(datafile):
+def parsedatafile(statusdump):
 	game_info = {}
 	nation_status = {}
-	with open(datafile) as f:
+	with open(statusdump) as f:
 		lines = f.readlines()
 		game_info['name'] = re.search(p_gamename, lines[0])[1]
 		temp = re.search(p_gameinfo, lines[1])
@@ -288,10 +304,11 @@ async def status(ctx, name=None):
 			game_details = ['**'+game+'**', '*'+turn+'*']
 			if game == games['current_game']:
 				time_left = None
-				if games[games['current_game']]['next_autohost_time'] is not None:
-					time_left = str(games[games['current_game']]['next_autohost_time'] - datetime.now())
-					next_autohost_str = "Next turn in approximately: " + time_left
-					game_details.append(next_autohost_str)
+				if 'next_autohost_time' in games[games['current_game']].keys():
+					if games[games['current_game']]['next_autohost_time'] is not None:
+						time_left = str(games[games['current_game']]['next_autohost_time'] - datetime.now())
+						next_autohost_str = "Next turn in approximately: " + time_left
+						game_details.append(next_autohost_str)
 			# the below are 3, 4, 5 in result
 			# has not taken turn: 1 0 0
 			# mark as unfinished and exit: 1 0 1
@@ -299,13 +316,19 @@ async def status(ctx, name=None):
 			# AI: no indicator?
 			# defeated: -2 0 0
 			for nation in sorted(nation_status):
-				state = 'WAITING'
-				if nation_status[nation][3] == '-2':
-					state = '~~defeated~~'
-				elif nation_status[nation][5] == '1':
-					state = 'UNFINISHED'
-				elif nation_status[nation][5] == '2':
-					state = 'turn submitted'
+				if game_info['turn'] == -1:
+					if nation_status[nation][3] == '1':
+						state = 'CLAIMED'
+					else:
+						state = 'FREE'
+				else:
+					state = 'WAITING'
+					if nation_status[nation][3] == '-2':
+						state = '~~defeated~~'
+					elif nation_status[nation][5] == '1':
+						state = 'UNFINISHED'
+					elif nation_status[nation][5] == '2':
+						state = 'turn submitted'
 				game_details.append("__" + nation + "__" + ": " + state)
 			output = '\n'.join(game_details)
 			await ctx.send(output)
