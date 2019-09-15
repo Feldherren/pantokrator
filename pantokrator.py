@@ -8,6 +8,7 @@ import sys
 import pickle 
 
 # TODO: double check nested dicts are created where necessary
+# TODO: Tien, Tir and other wordy-named nations might not be read properly from statusdump.txt; test this at some point
 # TODO: running and checking more than one game at once?
 # Need to set what games are tracked/watched by the BOT; track/untrack? activate/deactivate?
 # Need to make various commands require specifying name
