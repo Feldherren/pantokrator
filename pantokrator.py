@@ -30,7 +30,7 @@ description = '''Pantokrator, a Dominions 5 bot for raspberry pi and python.'''
 SAVEDIR = '/home/pi/.dominions5/savedgames'
 DATAFILE = 'games'
 global games
-games = {'current_game':None}
+games = {'current_game':None, 'active_games' = []}
 
 seasons = {0: 'early spring', 1: 'spring', 2:'late spring', 3:'early summer', 4:'summer', 5:'late summer', 6:'early fall', 7:'fall', 8:'late fall', 9:'early winter', 10:'winter', 11:'late winter'}
 NATIONS_EARLY_IDS = [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31,32,36,37,38,39,40]
@@ -95,23 +95,49 @@ async def setgame(ctx, name=None):
 	else:
 		await ctx.send("No game specified; please specify a game next time")
 
-# TODO: allow setting watch on other games? Without setting them as current game first
-@bot.command(brief="Starts watching current game for updates.", help="Sets yourself as watching the current game; you will receive DMs from Pantokrator whenever it detects a new turn has been processed.")
-async def watch(ctx):
+# setting the named game as an active game; 'activate'?
+@bot.command(brief="Adds named game to the list of active games for update watching.", help="Adds the named game to the list of active games, if a valid game; Pantokrator will watch these games for updates.")
+async def activate(ctx, game_name):
 	global games
-	if games['current_game'] in games:
-		if 'watchers' not in games[games['current_game']]:
-			games[games['current_game']]['watchers'] = []
-		user_id = ctx.author.id
-		if user_id not in games[games['current_game']]['watchers']:
-			games[games['current_game']]['watchers'].append(user_id)
-			await ctx.send("You are now watching the current game, " + games['current_game'] + ", and will receive a DM whenever a new turn processes.")
+	# first confirm game exists
+	statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
+	if os.path.exists(statusdump):
+		if game_name not in games['active_games']:
+			games['active_games'].append(game_name)
+			await ctx.send(game_name + " is now listed as an active game, and available for use with commands.")
 			save_data(DATAFILE)
 		else:
-			await ctx.send("You are already watching the current game, " + games['current_game'] + ".")
+			await ctx.send(game_name + " is already an active game.")
 	else:
-		await ctx.send("No game set; please set a game using ?setgame first")
+		await ctx.send("Can't find statusdump.txt for " + game_name + "; please make sure it's a valid game.")
 
+@bot.command(brief="Removes named game from the list of active games.", help="Removes the named game from the list of active games. Pantokrator will stop watching games for updates.")
+async def deactivate(ctx, game_name):
+	global games
+	if game_name in games['active_games']:
+		games['active_games'].remove(game_name)
+	else:
+		await ctx.send(game_name + " isn't an active game.")
+
+# TODO: allow setting watch on other games? Without setting them as current game first
+@bot.command(brief="Starts watching an active game for updates.", help="Sets yourself as watching an active game; you will receive DMs from Pantokrator whenever it detects a new turn has been processed.")
+async def watch(ctx, game_name=None):
+	global games
+	if game_name is not None:
+		if game_name in games['active_games']:
+			if 'watchers' not in games[game_name]:
+				games[game_name]['watchers'] = []
+			user_id = ctx.author.id
+			if user_id not in games[game_name]['watchers']:
+				games[game_name]['watchers'].append(user_id)
+				await ctx.send("You are now watching the game " + game_name + ", and will receive a DM whenever a new turn processes.")
+				save_data(DATAFILE)
+			else:
+				await ctx.send("You are already watching this game, " + game_name + ".")
+	else:
+		await ctx.send("No game supplied; please state the name of the game you want to follow")
+
+# TODO: rewrite to use active_games instead of current_game
 @bot.command(brief="Stops watching the current game for updates.", help="Removes yourself from the list of users watching the current game. Pantokrator will no longer DM you on new turns.")
 async def unwatch(ctx):
 	global games
@@ -138,6 +164,7 @@ def get_nick_or_name(author):
 		
 # take basic discord name?
 # TODO: maybe require verifying nation exists?
+# TODO: rewrite to use active_games instead of current_game
 @bot.command(brief="Claim a nation for your own.", help="Claim a nation for yourself, in the current game. Note that this doesn't verify you entered a real nation, or something not already claimed.")
 async def claim(ctx, nation):
 	global games
@@ -151,6 +178,7 @@ async def claim(ctx, nation):
 	else:
 		await ctx.send("No game set; please set a game using setgame first")
 	
+# TODO: rewrite to use active_games instead of current_game
 @bot.command(brief="Unclaims your nation.", help="Unclaims the provided nation you've taken for yourself, in the current game. Use this in the same context you used claim, as otherwise it may not recogise you.")
 async def unclaim(ctx, nation):
 	global games
@@ -171,6 +199,7 @@ async def unclaim(ctx, nation):
 		await ctx.send("No game set; please set a game using setgame first")
 	
 # WHOIS?
+# TODO: rewrite to use active_games instead of current_game
 @bot.command(brief="Lists claimed nations and players in current game.", help="Lists players who have claimed a nation in the current game.")
 async def who(ctx):
 	global games
@@ -185,6 +214,7 @@ async def who(ctx):
 		await ctx.send("No nations have been claimed in this game, yet; have someone use the claim command to start using this.")
 
 # TODO: let people set it for arbitrary game, instead of just current
+# TODO: rewrite to use active_games instead of current_game
 @bot.command(brief="Sets autohost interval for current game.", help="Sets autohost interval used by bot to predict time until next autohost.")
 async def autohost(ctx, hours):
 	global games
@@ -241,6 +271,7 @@ def parsedatafile(statusdump):
 	# else:
 		# await ctx.send("no watchers")
 
+# TODO: rewrite to use active_games instead of only for current_game
 @tasks.loop(seconds=10.0)
 async def check_current_game():
 	print("Checking...")
@@ -275,6 +306,7 @@ async def before_check_loop():
 	load_data(DATAFILE)
 	await bot.wait_until_ready()
 				
+# TODO: remove references to current_game
 @bot.command(brief="Outputs game status", help="Outputs game status, including current turn, predicted autohost and nation status.")
 async def status(ctx, name=None):
 	global games
