@@ -18,6 +18,7 @@ import pickle
 # TODO: means of extending turn automatically? Going to want this limited to me, though
 # TODO: means of limiting the use of certain commands to me only; better than hiding it. Store the ID like I do for watching games.
 # TODO: means of marking someone as AI-controlled, since the bot can't read that
+# TODO: if a game has any watchers, check it
 
 TOKEN = ''
 SYMBOL = '?'
@@ -139,7 +140,7 @@ async def watch(ctx, game_name=None):
 
 # TODO: rewrite to use active_games instead of current_game
 @bot.command(brief="Stops watching the current game for updates.", help="Removes yourself from the list of users watching the current game. Pantokrator will no longer DM you on new turns.")
-async def unwatch(ctx):
+async def unwatch(ctx, game_name):
 	global games
 	if games['current_game'] in games:
 		if 'watchers' in games[games['current_game']]:
@@ -162,68 +163,82 @@ def get_nick_or_name(author):
 			name = ctx.author.nick
 	return name
 		
-# take basic discord name?
-# TODO: maybe require verifying nation exists?
-# TODO: rewrite to use active_games instead of current_game
-@bot.command(brief="Claim a nation for your own.", help="Claim a nation for yourself, in the current game. Note that this doesn't verify you entered a real nation, or something not already claimed.")
-async def claim(ctx, nation):
+@bot.command(brief="Claim a nation for your own in the named game.", help="Claim a nation for yourself, in the named game. Note that this doesn't verify you entered a real nation, or something not already claimed.")
+async def claim(ctx, game_name, nation):
 	global games
-	if games['current_game'] in games:
-		if 'players' not in games[games['current_game']].keys():
-			games[games['current_game']]['players'] = {}
-		player = get_nick_or_name(ctx.author)
-		games[games['current_game']]['players'][nation] = player
-		await ctx.send(player + " has claimed the nation " + nation)
-		save_data(DATAFILE)
-	else:
-		await ctx.send("No game set; please set a game using setgame first")
-	
-# TODO: rewrite to use active_games instead of current_game
-@bot.command(brief="Unclaims your nation.", help="Unclaims the provided nation you've taken for yourself, in the current game. Use this in the same context you used claim, as otherwise it may not recogise you.")
-async def unclaim(ctx, nation):
-	global games
-	if games['current_game'] in games:
-		if 'players' not in games[games['current_game']].keys():
-			games[games['current_game']]['players'] = {}
-		player = get_nick_or_name(ctx.author)
-		if nation in games[games['current_game']]['players']:
-			if games[games['current_game']]['players'][nation] == player:
-				games[games['current_game']]['players'].pop(nation)
-				await ctx.send(player + " has removed their claim on nation " + nation)
+	if game_name is not None:
+		if nation is not None:
+			if game_name in games:
+				if 'players' not in games[game_name].keys():
+					games[game_name]['players'] = {}
+				player = get_nick_or_name(ctx.author)
+				games[game_name]['players'][nation] = player
+				await ctx.send(player + " has claimed the nation " + nation + " for the game " + game_name)
+				save_data(DATAFILE)
 			else:
-				await ctx.send("That nation is claimed, but you don't own it.")
+				await ctx.send(game_name + " not found in games list; please supply a valid game name.")
 		else:
-			await ctx.send("That nation has not been claimed.")
-		save_data(DATAFILE)
+			await ctx.send("Please supply a nation.")
 	else:
-		await ctx.send("No game set; please set a game using setgame first")
+		await ctx.send("Please supply a valid game name.")
+	
+@bot.command(brief="Unclaims your nation.", help="Unclaims the provided nation you've taken for yourself, in the current game. Use this in the same context you used claim, as otherwise it may not recogise you.")
+async def unclaim(ctx, game_name, nation):
+	global games
+	if game_name is not None:
+		if game_name in games:
+			if 'players' not in games[game_name].keys():
+				games[game_name]['players'] = {}
+			player = get_nick_or_name(ctx.author)
+			if nation in games[game_name]['players']:
+				if games[game_name]['players'][nation] == player:
+					games[game_name]['players'].pop(nation)
+					await ctx.send(player + " has removed their claim on nation " + nation + " in the game " + game_name)
+					save_data(DATAFILE)
+				else:
+					await ctx.send("That nation is claimed, but you don't seem to own it.")
+			else:
+				await ctx.send("That nation has not been claimed.")
+		else:
+			await ctx.send(game_name + " not found in games list; please supply a valid game name.")
+	else:
+		await ctx.send("Please supply a valid game name.")
 	
 # WHOIS?
-# TODO: rewrite to use active_games instead of current_game
-@bot.command(brief="Lists claimed nations and players in current game.", help="Lists players who have claimed a nation in the current game.")
-async def who(ctx):
+@bot.command(brief="Lists claimed nations and players in named game.", help="Lists players who have claimed a nation in the named game.")
+async def who(ctx, game_name):
 	global games
 	output = []
-	if 'players' in games[games['current_game']].keys():
-		for nation in sorted(games[games['current_game']]['players']):
-			output.append(nation + ": " + games[games['current_game']]['players'][nation])
-	if len(output) >= 1:
-		whois = "\n".join(output)
-		await ctx.send(whois)
+	if game_name is not None:
+		if game_name in games:
+			if 'players' in games[game_name].keys():
+				for nation in sorted(games[game_name]['players']):
+					output.append(nation + ": " + games[game_name]['players'][nation])
+			if len(output) >= 1:
+				whois = "\n".join(output)
+				await ctx.send(whois)
+			else:
+				await ctx.send("No nations have been claimed in this game, yet; have someone use the claim command to start using this.")
+		else:
+			await ctx.send(game_name + " not found in games list; please supply a valid game name.")
 	else:
-		await ctx.send("No nations have been claimed in this game, yet; have someone use the claim command to start using this.")
+		await ctx.send("Please supply a valid game name.")
 
-# TODO: let people set it for arbitrary game, instead of just current
-# TODO: rewrite to use active_games instead of current_game
-@bot.command(brief="Sets autohost interval for current game.", help="Sets autohost interval used by bot to predict time until next autohost.")
-async def autohost(ctx, hours):
+@bot.command(brief="Sets autohost interval for the specified game.", help="Sets autohost interval used by bot to predict time until next autohost.")
+async def autohost(ctx, game_name, hours):
 	global games
-	if hours is not None:
-		games[games['current_game']]['autohost_interval'] = int(hours)
-		await ctx.send("Autohost interval is now set to " + hours + " hours.")
-		save_data(DATAFILE)
+	if game_name is not None:
+		if game_name in games:
+			if hours is not None:
+				games[game_name]['autohost_interval'] = int(hours)
+				await ctx.send("Autohost interval is now set to " + hours + " hours.")
+				save_data(DATAFILE)
+			else:
+				await ctx.send("Please supply a valid autohost period in hours as an integer")
+		else:
+			await ctx.send(game_name + " not found in games list; please supply a valid game name.")
 	else:
-		await ctx.send("Please supply a valid autohost period in hours as an integer")
+		await ctx.send("Please supply a valid game name.")
 
 p_gamename = re.compile("Status for '(.+)'", re.IGNORECASE)
 p_gameinfo = re.compile('turn (-?\d+), era (\d), mods (\d+), turnlimit (\d+)')
@@ -271,35 +286,30 @@ def parsedatafile(statusdump):
 	# else:
 		# await ctx.send("no watchers")
 
-# TODO: rewrite to use active_games instead of only for current_game
 @tasks.loop(seconds=10.0)
-async def check_current_game():
-	print("Checking...")
+async def check_active_games():
 	global games
-	print(games['current_game'])
-	if games['current_game'] is not None:
-		# print("Checking " + current_game)
-		statusdump = os.path.join(SAVEDIR, games['current_game'], "statusdump.txt")
+	for game in active_games:
+		print("Checking " + game)
+		statusdump = os.path.join(SAVEDIR, game, "statusdump.txt")
 		if os.path.exists(statusdump):
 			game_info, nation_data = parsedatafile(statusdump)
-			if game_info['turn'] != games[games['current_game']]['turn']:
+			if game_info['turn'] != games[game]['turn']:
 				print("It is a new turn!")
-				games[games['current_game']]['next_autohost_time'] = datetime.now() + timedelta(hours=games[games['current_game']]['autohost_interval'])
-				for watcher in games[games['current_game']]['watchers']:
-					print(watcher)
+				games[game]['next_autohost_time'] = datetime.now() + timedelta(hours=games[game]['autohost_interval'])
+				for watcher in games[game]['watchers']:
 					user = bot.get_user(watcher)
-					print(user) # this fails? when launched, anyway
 					if user is not None:
 						if user.dm_channel is None:
 							await user.create_dm()
 						dm = user.dm_channel
-						await dm.send(games['current_game'] + ' just generated a new turn!')
+						await dm.send(game + ' just generated a new turn!')
 					else:
 						print("Error: User with ID " + str(id) + " not found")
-				games[games['current_game']]['turn'] = game_info['turn']
+				games[game]['turn'] = game_info['turn']
 				save_data(DATAFILE)
 
-@check_current_game.before_loop
+@check_active_games.before_loop
 async def before_check_loop():
 	global games
 	print('starting up...')
