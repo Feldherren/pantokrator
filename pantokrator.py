@@ -7,22 +7,23 @@ from datetime import datetime, timedelta
 import sys
 import pickle 
 
+# TODO: running and checking more than one game at once?
+
+# TODO: opt-in reminder that you haven't taken your turn yet; reminders PM you at 12, 6, 3 and 1 hours before the turn is due
+# requires: claiming a nation for the game (spelled correctly or recognisable through the dict below), and opting in to reminders
+
 # TODO: double check nested dicts are created where necessary
 # TODO: Tien, Tir and other wordy-named nations might not be read properly from statusdump.txt; test this at some point
-# TODO: running and checking more than one game at once?
-# Need to set what games are tracked/watched by the BOT; track/untrack? activate/deactivate?
-# Need to make various commands require specifying name
-# Keep command to scan for games, but listgames only lists tracked/active games?
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
 # TODO: means of setting/resetting turn estimate, in case I extend it
 # TODO: means of extending turn automatically? Going to want this limited to me, though
-# TODO: means of limiting the use of certain commands to me only; better than hiding it. Store the ID like I do for watching games.
 # TODO: means of marking someone as AI-controlled, since the bot can't read that
-# TODO: if a game has any watchers, check it
+
 
 TOKEN = ''
 SYMBOL = '?'
 KEEPCHARACTERS = ['_', '-']
+ADMIN_USER_IDS = [] # TODO: get my own id, plug it in here
 
 bot = commands.Bot(command_prefix=commands.when_mentioned_or(SYMBOL))
 
@@ -56,18 +57,19 @@ def load_data(f):
 		with open(f, 'rb') as infile:
 			games = pickle.load(infile)
 
-@bot.command()
+@bot.command(hidden=True)
+@commands.is_owner()
 async def shutdown(ctx):
 	save_data(DATAFILE)
 	await ctx.send("All data saved, shutting down.")
 	await bot.close()
 	sys.exit()
 
-@bot.command(brief="Lists detected games on Pi.")
+@bot.command(brief="Lists active games.")
 async def listgames(ctx):
-	games = [name for name in os.listdir(SAVEDIR) if os.path.isdir(os.path.join(SAVEDIR, name))]
-	if len(games) >= 1:
-		game_list = '\n'.join(games)
+	global games
+	if len(games['active_games']) >= 1:
+		game_list = '\n'.join(games['active_games'])
 	else:
 		game_list = 'No games found; start one!'
 	await ctx.send(game_list)
@@ -84,7 +86,7 @@ async def setgame(ctx, name=None):
 			statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
 			if os.path.exists(statusdump):
 				game_info, nation_status = parsedatafile(statusdump)
-				current_turn = game_info['turn'] # always thought it was a new turn, because this was a string; do strings compare well?
+				current_turn = game_info['turn']
 				games[games['current_game']]['turn'] = current_turn
 				#games[games['current_game']]['next_autohost_time'] = None
 			else:
@@ -97,14 +99,20 @@ async def setgame(ctx, name=None):
 		await ctx.send("No game specified; please specify a game next time")
 
 # setting the named game as an active game; 'activate'?
+# TODO: put stuff from setgame in here; might as well be setup for everything the bot does anyway; make sure all's added that we need
 @bot.command(brief="Adds named game to the list of active games for update watching.", help="Adds the named game to the list of active games, if a valid game; Pantokrator will watch these games for updates.")
-async def activate(ctx, game_name):
+async def add(ctx, game_name):
 	global games
 	# first confirm game exists
 	statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
 	if os.path.exists(statusdump):
 		if game_name not in games['active_games']:
 			games['active_games'].append(game_name)
+			game_info, nation_status = parsedatafile(statusdump)
+			current_turn = game_info['turn']
+			games[game_name]['turn'] = current_turn
+			games[game_name]['reminders'] = 0
+			games[game_name]['player_reminders'] = []
 			await ctx.send(game_name + " is now listed as an active game, and available for use with commands.")
 			save_data(DATAFILE)
 		else:
@@ -113,14 +121,13 @@ async def activate(ctx, game_name):
 		await ctx.send("Can't find statusdump.txt for " + game_name + "; please make sure it's a valid game.")
 
 @bot.command(brief="Removes named game from the list of active games.", help="Removes the named game from the list of active games. Pantokrator will stop watching games for updates.")
-async def deactivate(ctx, game_name):
+async def remove(ctx, game_name):
 	global games
 	if game_name in games['active_games']:
 		games['active_games'].remove(game_name)
 	else:
 		await ctx.send(game_name + " isn't an active game.")
 
-# TODO: allow setting watch on other games? Without setting them as current game first
 @bot.command(brief="Starts watching an active game for updates.", help="Sets yourself as watching an active game; you will receive DMs from Pantokrator whenever it detects a new turn has been processed.")
 async def watch(ctx, game_name=None):
 	global games
@@ -138,23 +145,25 @@ async def watch(ctx, game_name=None):
 	else:
 		await ctx.send("No game supplied; please state the name of the game you want to follow")
 
-# TODO: rewrite to use active_games instead of current_game
 @bot.command(brief="Stops watching the current game for updates.", help="Removes yourself from the list of users watching the current game. Pantokrator will no longer DM you on new turns.")
-async def unwatch(ctx, game_name):
+async def unwatch(ctx, game_name=None):
 	global games
-	if games['current_game'] in games:
-		if 'watchers' in games[games['current_game']]:
-			user_id = ctx.author.id
-			if user_id in games[games['current_game']]['watchers']:
-				games[games['current_game']]['watchers'].remove(user_id)
-				await ctx.send("You have stopped watching the current game, " + games['current_game'] + ", and will not receive updates whenever a new turn processes.")
-				save_data(DATAFILE)
+	if game_name is not None:
+		if game_name in games['active_games']:
+			if 'watchers' in games[game_name]:
+				user_id = ctx.author.id
+				if user_id in games[game_name]['watchers']:
+					games[game_name]['watchers'].remove(user_id)
+					await ctx.send("You have stopped watching the game " + game_name + ", and will not receive updates whenever a new turn processes.")
+					save_data(DATAFILE)
+				else:
+					await ctx.send("You aren't watching the game " + game_name + ".")
 			else:
-				await ctx.send("You aren't watching the current game, " + games['current_game'] + ".")
+				await ctx.send("You aren't watching the game " + game_name + ".")
 		else:
-			await ctx.send("You aren't watching the current game, " + games['current_game'] + ".")
+			await ctx.send(game_name + " not found in active games list; please supply a valid game name.")
 	else:
-		await ctx.send("No game set; please set a game using setgame first")
+		await ctx.send("No game supplied; please state the name of the game you want to stop watching")
 		
 def get_nick_or_name(author):
 	name = author.name
@@ -162,7 +171,12 @@ def get_nick_or_name(author):
 		if author.nick is not None:
 			name = ctx.author.nick
 	return name
+	
+def get_username_from_id(user_id):
+	return bot.get_user(user_id).name
 		
+# TODO: make this get nation name from NATIONS_ALL_VALID_ALIASES?
+# when comparing with the statusdump.txt content for checking if to remind someone, also use that
 @bot.command(brief="Claim a nation for your own in the named game.", help="Claim a nation for yourself, in the named game. Note that this doesn't verify you entered a real nation, or something not already claimed.")
 async def claim(ctx, game_name, nation):
 	global games
@@ -172,7 +186,8 @@ async def claim(ctx, game_name, nation):
 				if 'players' not in games[game_name].keys():
 					games[game_name]['players'] = {}
 				player = get_nick_or_name(ctx.author)
-				games[game_name]['players'][nation] = player
+				user_id = ctx.author.id
+				games[game_name]['players'][nation] = user_id
 				await ctx.send(player + " has claimed the nation " + nation + " for the game " + game_name)
 				save_data(DATAFILE)
 			else:
@@ -191,9 +206,10 @@ async def unclaim(ctx, game_name, nation):
 				games[game_name]['players'] = {}
 			player = get_nick_or_name(ctx.author)
 			if nation in games[game_name]['players']:
-				if games[game_name]['players'][nation] == player:
+				user_id = ctx.author.id
+				if games[game_name]['players'][nation] == user_id:
 					games[game_name]['players'].pop(nation)
-					await ctx.send(player + " has removed their claim on nation " + nation + " in the game " + game_name)
+					await ctx.send(get_username_from_id(user_id) + " has removed their claim on nation " + nation + " in the game " + game_name)
 					save_data(DATAFILE)
 				else:
 					await ctx.send("That nation is claimed, but you don't seem to own it.")
@@ -213,7 +229,7 @@ async def who(ctx, game_name):
 		if game_name in games:
 			if 'players' in games[game_name].keys():
 				for nation in sorted(games[game_name]['players']):
-					output.append(nation + ": " + games[game_name]['players'][nation])
+					output.append(nation + ": " + get_username_from_id(games[game_name]['players'][nation]))
 			if len(output) >= 1:
 				whois = "\n".join(output)
 				await ctx.send(whois)
@@ -264,46 +280,55 @@ def parsedatafile(statusdump):
 			nation_status[n[7]] = n
 	return game_info, nation_status
 	
-# @bot.command()
-# async def test(ctx):
-	# dm = None
-	# id = ctx.author.id
-	# print(id)
-	# user = bot.get_user(id)
-	# print(user)
-	# if user.dm_channel is None:
-		# await user.create_dm()
-	# dm = user.dm_channel
+# actual function for sending reminders
+# TODO: write this
+async def send_reminders(hour):
 	
-	# await dm.send("Testing sending DMs via ID")
-	
-# @bot.command()
-# async def watchers(ctx):
-	# global watchers
-	# if len(watchers) >= 1:
-		# for watcher in watchers:
-			# await ctx.send(watcher)
-	# else:
-		# await ctx.send("no watchers")
+		
+# loop for checking each game and reminding registered players that a turn will be processed in 12, 6, 3 and 1 hours
+# MAKE SURE IT ONLY RUNS ONCE PER PERIOD
+# TODO: write the thing
+@tasks.loop(seconds=60.0)
+async def reminder_loop():
+	global games
+	for game_name in active_games:
+		if games[game_name]['next_autohost_time'] is not None:
+			if games[game_name]['reminders'] == 0 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=12): 
+				# 12-hour reminder
+				send_reminders(12)
+				reminders = 1
+			elif games[game_name]['reminders'] == 1 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=6): 
+				# 6 hour reminder
+				send_reminders(6)
+				reminders = 2
+			elif games[game_name]['reminders'] == 2 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=3): 
+				# 3 hour reminder
+				send_reminders(3)
+				reminders = 3
+			elif games[game_name]['reminders'] == 3 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=1): 
+				# 1 hour reminder
+				send_reminders(1)
+				reminders = 4
 
 @tasks.loop(seconds=10.0)
 async def check_active_games():
 	global games
-	for game in active_games:
-		print("Checking " + game)
-		statusdump = os.path.join(SAVEDIR, game, "statusdump.txt")
+	for game_name in active_games:
+		print("Checking " + game_name)
+		statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
 		if os.path.exists(statusdump):
 			game_info, nation_data = parsedatafile(statusdump)
-			if game_info['turn'] != games[game]['turn']:
+			if game_info['turn'] != games[game_name]['turn']:
 				print("It is a new turn!")
-				games[game]['next_autohost_time'] = datetime.now() + timedelta(hours=games[game]['autohost_interval'])
-				for watcher in games[game]['watchers']:
+				games[game_name]['next_autohost_time'] = datetime.now() + timedelta(hours=games[game_name]['autohost_interval'])
+				for watcher in games[game_name]['watchers']:
 					user = bot.get_user(watcher)
 					if user is not None:
 						if user.dm_channel is None:
 							await user.create_dm()
 						dm = user.dm_channel
-						await dm.send(game + ' just generated a new turn!')
+						await dm.send(game_name + ' just generated a new turn!')
+						games[game_name]['reminders'] = 0 # so it doesn't spam reminders
 					else:
 						print("Error: User with ID " + str(id) + " not found")
 				games[game]['turn'] = game_info['turn']
@@ -315,6 +340,7 @@ async def before_check_loop():
 	print('starting up...')
 	load_data(DATAFILE)
 	await bot.wait_until_ready()
+	reminder_loop.start()
 				
 # TODO: remove references to current_game
 @bot.command(brief="Outputs game status", help="Outputs game status, including current turn, predicted autohost and nation status.")
@@ -376,5 +402,5 @@ async def status(ctx, name=None):
 			output = '\n'.join(game_details)
 			await ctx.send(output)
 			
-check_current_game.start()
+check_active_games.start()
 bot.run(TOKEN, bot=True)
