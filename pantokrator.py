@@ -11,13 +11,23 @@ import pickle
 
 # TODO: opt-in reminder that you haven't taken your turn yet; reminders PM you at 12, 6, 3 and 1 hours before the turn is due
 # requires: claiming a nation for the game (spelled correctly or recognisable through the dict below), and opting in to reminders
+# independent of watch status, as someone might want one without the other.
+# 	TODO: write send_reminders()
+#	TODO: make sure claim/unclaim still work with storing user_id now, and that ?who gets the proper nation name
+#	TODO: make sure reminder_loop starts properly and runs
+#	TODO: generally make it bug-free
+#	TODO: see if on_command_error needs to be set for me-only commands
+#	TODO: means of setting/resetting turn estimate, in case I extend it (me-only)
+# 	TODO: means of extending turn automatically? Going to want this limited to me, though
+#	TODO: also, automatically pausing, unpausing the game. Now I have the domcmd files set up, should be easy to just copy those into domcmd in the save directory (me-only, again)
+#	TODO: means of marking someone as AI-controlled, since the bot can't read that (me-only)
 
 # TODO: double check nested dicts are created where necessary
 # TODO: Tien, Tir and other wordy-named nations might not be read properly from statusdump.txt; test this at some point
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
-# TODO: means of setting/resetting turn estimate, in case I extend it
-# TODO: means of extending turn automatically? Going to want this limited to me, though
-# TODO: means of marking someone as AI-controlled, since the bot can't read that
+
+
+
 
 
 TOKEN = ''
@@ -32,7 +42,7 @@ description = '''Pantokrator, a Dominions 5 bot for raspberry pi and python.'''
 SAVEDIR = '/home/pi/.dominions5/savedgames'
 DATAFILE = 'games'
 global games
-games = {'current_game':None, 'active_games' = []}
+games = {'active_games' = []}
 
 seasons = {0: 'early spring', 1: 'spring', 2:'late spring', 3:'early summer', 4:'summer', 5:'late summer', 6:'early fall', 7:'fall', 8:'late fall', 9:'early winter', 10:'winter', 11:'late winter'}
 NATIONS_EARLY_IDS = [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31,32,36,37,38,39,40]
@@ -100,6 +110,7 @@ async def setgame(ctx, name=None):
 
 # setting the named game as an active game; 'activate'?
 # TODO: put stuff from setgame in here; might as well be setup for everything the bot does anyway; make sure all's added that we need
+#@commands.is_owner()
 @bot.command(brief="Adds named game to the list of active games for update watching.", help="Adds the named game to the list of active games, if a valid game; Pantokrator will watch these games for updates.")
 async def add(ctx, game_name):
 	global games
@@ -120,6 +131,7 @@ async def add(ctx, game_name):
 	else:
 		await ctx.send("Can't find statusdump.txt for " + game_name + "; please make sure it's a valid game.")
 
+@commands.is_owner()
 @bot.command(brief="Removes named game from the list of active games.", help="Removes the named game from the list of active games. Pantokrator will stop watching games for updates.")
 async def remove(ctx, game_name):
 	global games
@@ -240,6 +252,7 @@ async def who(ctx, game_name):
 	else:
 		await ctx.send("Please supply a valid game name.")
 
+@commands.is_owner()
 @bot.command(brief="Sets autohost interval for the specified game.", help="Sets autohost interval used by bot to predict time until next autohost.")
 async def autohost(ctx, game_name, hours):
 	global games
