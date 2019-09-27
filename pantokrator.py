@@ -12,18 +12,18 @@ import pickle
 # TODO: opt-in reminder that you haven't taken your turn yet; reminders PM you at 12, 6, 3 and 1 hours before the turn is due
 # requires: claiming a nation for the game (spelled correctly or recognisable through the dict below), and opting in to reminders
 # independent of watch status, as someone might want one without the other.
-# 	TODO: write send_reminders()
+# 	TODO: finish send_reminders()
+#	TODO: finish reminders() bot function
 #	TODO: make sure claim/unclaim still work with storing user_id now, and that ?who gets the proper nation name
 #	TODO: make sure reminder_loop starts properly and runs
 #	TODO: generally make it bug-free
 #	TODO: see if on_command_error needs to be set for me-only commands
 #	TODO: means of setting/resetting turn estimate, in case I extend it (me-only)
-# 	TODO: means of extending turn automatically? Going to want this limited to me, though
+# 	TODO: means of extending turn via bot? (me-only)
 #	TODO: also, automatically pausing, unpausing the game. Now I have the domcmd files set up, should be easy to just copy those into domcmd in the save directory (me-only, again)
 #	TODO: means of marking someone as AI-controlled, since the bot can't read that (me-only)
+#	TODO: Tien, Tir and other wordy-named nations might not be read properly from statusdump.txt; test this at some point
 
-# TODO: double check nested dicts are created where necessary
-# TODO: Tien, Tir and other wordy-named nations might not be read properly from statusdump.txt; test this at some point
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
 
 
@@ -54,7 +54,65 @@ NATIONS_LATE = {'arcoscephale':80, 'arco':80, 'pythium':81, 'lemuria':82, 'man':
 NATIONS_ALL_IDS = []
 # TODO: add IDs as aliases
 # TODO: add nations to status? Emp figures it'd be bad
-NATIONS_ALL_VALID_ALIASES = {5:"Arcoscephale",'arco':'Arcoscephale', 'arcoscephale':'Arcoscephale', 6:"Ermor", 'ermor':'Ermor', 7:"Ulm", 'ulm':'Ulm', 8:'Marverni', 'marverni':'Marverni', 9:"Sauromatia", 'sauromatia':'Sauromatia', 'sauro':'Sauromatia', 10:"T'ien Ch'i", "t'ien ch'i":"T'ien Ch'i", "t'ien":"T'ien Ch'i", 'tien chi':"T'ien Ch'i", 'tien':"T'ien Ch'i", 11:'Machaka', 'machaka':'Machaka', 12:'Mictlan', 'mictlan':'Mictlan', 13:'Abysia', 'abysia':'Abysia', 14:'Caelum', 'caelum':'Caelum', "c'tis":"C'tis", 'ctis':"C'tis", 'pangaea':"Pangaea", 'agartha':"Agartha", "tir na n'og":"Tir na n'Og", 'tir na nog':"Tir na n'Og", 'tir':"Tir na n'Og", 'fomoria':"Fomoria", 'vanheim':"Vanheim", 'helheim':"Helheim", 'niefelheim':"Niefelheim", 'rus':"Rus", 'kailasa':"Kailasa", 'lanka':"Lanka", 'yomi':"Yomi", 'hinnom':"Hinnom", 'ur':"Ur", 'berytos':"Herytos", 'xibalba':"Xibalba", 'mekone':"Mekone", 'atlantis':"Atlantis", "r'lyeh":"R'lyeh", 'rlyeh':"R'lyeh", 'pelagia':"Pelagia", 'oceania':"Oceania", 'therodos':"Therodos"}
+NATIONS_ALL_VALID_ALIASES = {
+5:"Arcoscephale", 43:"Arcoscephale", 80:"Arcoscephale", 'arco':'Arcoscephale', 'arcoscephale':'Arcoscephale', 
+6:"Ermor", 44:"Ermor", 'ermor':'Ermor', 
+7:"Ulm", 49:'Ulm', 84:'Ulm', 'ulm':'Ulm',  
+8:'Marverni', 'marverni':'Marverni', 
+9:"Sauromatia", 'sauromatia':'Sauromatia', 'sauro':'Sauromatia', 
+10:"T'ien Ch'i", 52:"T'ien Ch'i", 87:"T'ien Ch'i", "t'ien ch'i":"T'ien Ch'i", "t'ien":"T'ien Ch'i", 'tien chi':"T'ien Ch'i", 'tien':"T'ien Ch'i", 
+11:'Machaka', 53:'Machaka', 'machaka':'Machaka', 
+12:'Mictlan', 51:'Mictlan', 86:'Mictlan', 'mictlan':'Mictlan', 
+13:'Abysia', 55:'Abysia', 91:'Abysia', 'abysia':'Abysia', 
+14:'Caelum', 56:'Caelum', 92:'Caelum', 'caelum':'Caelum', 
+15:"C'tis", 57:"C'tis", 93:"C'tis", "c'tis":"C'tis", 'ctis':"C'tis", 
+16:"Pangaea", 58:'Pangaea', 94:'Pangaea', 'pangaea':"Pangaea", 
+17:"Agartha", 54:'Agartha', 90:'Agartha', 'agartha':"Agartha", 
+18:"Tir na n'Og", "tir na n'og":"Tir na n'Og", 'tir na nog':"Tir na n'Og", 'tir':"Tir na n'Og", 
+19:"Fomoria", 'fomoria':"Fomoria", 
+20:"Vanheim", 60:'Vanheim', 'vanheim':"Vanheim", 
+21:"Helheim", 'helheim':"Helheim", 
+22:"Niefelheim", 'niefelheim':"Niefelheim", 
+24:"Rus", 'rus':"Rus", 
+25:"Kailasa", 'kailasa':"Kailasa", 
+26:"Lanka", 'lanka':"Lanka", 
+27:"Yomi", 'yomi':"Yomi", 
+28:"Hinnom", 'hinnom':"Hinnom", 
+29:"Ur", 'ur':"Ur", 
+30:"Berytos", 'berytos':"Berytos", 
+31:"Xibalba", 68:'Xibalba', 101:'Xibalba', 'xibalba':"Xibalba", 
+32:"Mekone", 'mekone':"Mekone", 
+36:"Atlantis", 73:'Atlantis', 106:'Atlantis', 'atlantis':"Atlantis", 
+37:"R'lyeh", 74:"R'lyeh", 107:"R'lyeh", "r'lyeh":"R'lyeh", 'rlyeh':"R'lyeh", 
+38:"Pelagia", 75:'Pelagia', 'pelagia':"Pelagia", 
+39:"Oceania", 76:'Oceania', 'oceania':"Oceania", 
+40:"Therodos", 'therodos':"Therodos", 
+45:'Sceleria', 'sceleria':'Sceleria', 
+46:'Pythium', 81:'Pythium', 'pythium':'Pythium', 
+47:'Man', 83:'Man', 'man':'Man', 
+48:'Eriu', 'eriu':'Eriu', 
+50:'Marignon', 85:'Marignon', 'marignon':'Marignon', 
+59:'Asphodel', 'asphodel':'Asphodel',
+61:'Jotunheim', 'jotunheim':'Jotunheim',
+62:'Vanarus', 'vanarus':'Vanarus',
+63:'Bandar Log', 'bandar log':'Bandar Log', 'bandar':'Bandar Log',
+64:'Shinuyama', 'shinuyama':'Shinuyama',
+65:'Ashdod', 'ashdod':'Ashdod',
+66:'Uruk', 'uruk':'Uruk',
+67:'Nazca', 'nazca':'Nazca',
+69:'Phlegra', 102:'Phlegra', 'phlegra':'Phlegra',
+70:'Phaeacia', 'phaeacia':'Phaeacia',
+77:'Ys', 'ys':'Ys',
+82:'Lemuria', 'lemuria':'Lemuria' 
+89:'Jomon', 'jomon':'Jomon',
+95:'Midgard', 'midgard':'Midgard',
+96:'Utgard', 'utgard':'Utgard'
+97:'Bogarus', 'bogarus':'Bogarus',
+98:'Patala', 'patala':'Patala',
+99:'Gath', 'gath':'Gath',
+100:'Ragha', 'ragha':'Ragha',
+108:'Erytheia', 'erytheia':'Erytheia'
+}
 
 def save_data(f):
 	global games
@@ -84,29 +142,29 @@ async def listgames(ctx):
 		game_list = 'No games found; start one!'
 	await ctx.send(game_list)
 
-@bot.command(brief="Sets currently-running game.", help="Sets currently-running game.")
-async def setgame(ctx, name=None):
-	global games
-	if name is not None:
-		game_name = "".join(c for c in name if c.isalnum() or c in KEEPCHARACTERS).rstrip()
-		if os.path.exists(os.path.join(SAVEDIR, game_name)):
-			games['current_game'] = game_name
-			if game_name not in games.keys():
-				games[games['current_game']] = {}
-			statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
-			if os.path.exists(statusdump):
-				game_info, nation_status = parsedatafile(statusdump)
-				current_turn = game_info['turn']
-				games[games['current_game']]['turn'] = current_turn
-				#games[games['current_game']]['next_autohost_time'] = None
-			else:
-				current_turn = '?'
-			await ctx.send("Now watching " + games['current_game'])
-			save_data(DATAFILE)
-		else:
-			await ctx.send("No game called " + game_name + " found")
-	else:
-		await ctx.send("No game specified; please specify a game next time")
+# @bot.command(brief="Sets currently-running game.", help="Sets currently-running game.")
+# async def setgame(ctx, name=None):
+	# global games
+	# if name is not None:
+		# game_name = "".join(c for c in name if c.isalnum() or c in KEEPCHARACTERS).rstrip()
+		# if os.path.exists(os.path.join(SAVEDIR, game_name)):
+			# games['current_game'] = game_name
+			# if game_name not in games.keys():
+				# games[games['current_game']] = {}
+			# statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
+			# if os.path.exists(statusdump):
+				# game_info, nation_status = parsedatafile(statusdump)
+				# current_turn = game_info['turn']
+				# games[games['current_game']]['turn'] = current_turn
+				# #games[games['current_game']]['next_autohost_time'] = None
+			# else:
+				# current_turn = '?'
+			# await ctx.send("Now watching " + games['current_game'])
+			# save_data(DATAFILE)
+		# else:
+			# await ctx.send("No game called " + game_name + " found")
+	# else:
+		# await ctx.send("No game specified; please specify a game next time")
 
 # setting the named game as an active game; 'activate'?
 # TODO: put stuff from setgame in here; might as well be setup for everything the bot does anyway; make sure all's added that we need
@@ -124,6 +182,7 @@ async def add(ctx, game_name):
 			games[game_name]['turn'] = current_turn
 			games[game_name]['reminders'] = 0
 			games[game_name]['player_reminders'] = []
+			games[game_name]['players'] = {}
 			await ctx.send(game_name + " is now listed as an active game, and available for use with commands.")
 			save_data(DATAFILE)
 		else:
@@ -186,47 +245,68 @@ def get_nick_or_name(author):
 	
 def get_username_from_id(user_id):
 	return bot.get_user(user_id).name
+	
+def represents_int(s):
+    try: 
+        int(s)
+        return True
+    except ValueError:
+        return False
 		
-# TODO: make this get nation name from NATIONS_ALL_VALID_ALIASES?
 # when comparing with the statusdump.txt content for checking if to remind someone, also use that
 @bot.command(brief="Claim a nation for your own in the named game.", help="Claim a nation for yourself, in the named game. Note that this doesn't verify you entered a real nation, or something not already claimed.")
-async def claim(ctx, game_name, nation):
+async def claim(ctx, game_name=None, nation=None):
 	global games
 	if game_name is not None:
-		if nation is not None:
-			if game_name in games:
-				if 'players' not in games[game_name].keys():
-					games[game_name]['players'] = {}
-				player = get_nick_or_name(ctx.author)
-				user_id = ctx.author.id
-				games[game_name]['players'][nation] = user_id
-				await ctx.send(player + " has claimed the nation " + nation + " for the game " + game_name)
-				save_data(DATAFILE)
+		if game_name in games['active_games']:
+			if nation is not None:
+				# converting string into an int, or lower-case string
+				if represents_int(nation):
+					nation = int(nation)
+				else:
+					nation = nation.lower()
+				if nation in NATIONS_ALL_VALID_ALIASES:
+					player = get_nick_or_name(ctx.author)
+					user_id = ctx.author.id
+					games[game_name]['players'][NATIONS_ALL_VALID_ALIASES[nation]] = user_id
+					await ctx.send(player + " has claimed the nation " + NATIONS_ALL_VALID_ALIASES[nation] + " for the game " + game_name)
+					save_data(DATAFILE)
+				else:
+					await ctx.send("Please supply a recognised nation; contact Feldherren to get new aliases added.")
 			else:
-				await ctx.send(game_name + " not found in games list; please supply a valid game name.")
+				await ctx.send("Please supply a nation.")
 		else:
-			await ctx.send("Please supply a nation.")
+			await ctx.send(game_name + " not found in games list; please supply a valid game name.")
 	else:
 		await ctx.send("Please supply a valid game name.")
 	
-@bot.command(brief="Unclaims your nation.", help="Unclaims the provided nation you've taken for yourself, in the current game. Use this in the same context you used claim, as otherwise it may not recogise you.")
+@bot.command(brief="Unclaims your nation.", help="Unclaims the provided nation you've taken for yourself, in the stated game.")
 async def unclaim(ctx, game_name, nation):
 	global games
 	if game_name is not None:
-		if game_name in games:
-			if 'players' not in games[game_name].keys():
-				games[game_name]['players'] = {}
-			player = get_nick_or_name(ctx.author)
-			if nation in games[game_name]['players']:
-				user_id = ctx.author.id
-				if games[game_name]['players'][nation] == user_id:
-					games[game_name]['players'].pop(nation)
-					await ctx.send(get_username_from_id(user_id) + " has removed their claim on nation " + nation + " in the game " + game_name)
-					save_data(DATAFILE)
+		if game_name in games['active_games']:
+			if nation is not None:
+				# converting string into an int, or lower-case string
+				if represents_int(nation):
+					nation = int(nation)
 				else:
-					await ctx.send("That nation is claimed, but you don't seem to own it.")
+					nation = nation.lower()
+				if nation in NATIONS_ALL_VALID_ALIASES:
+					player = get_nick_or_name(ctx.author)
+					if nation in games[game_name]['players']:
+						user_id = ctx.author.id
+						if games[game_name]['players'][nation] == user_id:
+							games[game_name]['players'].pop(NATIONS_ALL_VALID_ALIASES[nation])
+							await ctx.send(get_username_from_id(user_id) + " has removed their claim on nation " + NATIONS_ALL_VALID_ALIASES[nation] + " in the game " + game_name)
+							save_data(DATAFILE)
+						else:
+							await ctx.send("That nation is claimed, but you don't seem to own it.")
+					else:
+						await ctx.send("That nation has not been claimed.")
+				else:
+					await ctx.send("Please supply a recognised nation; contact Feldherren to get new aliases added.")
 			else:
-				await ctx.send("That nation has not been claimed.")
+				await ctx.send("Please supply a nation.")
 		else:
 			await ctx.send(game_name + " not found in games list; please supply a valid game name.")
 	else:
@@ -268,6 +348,16 @@ async def autohost(ctx, game_name, hours):
 			await ctx.send(game_name + " not found in games list; please supply a valid game name.")
 	else:
 		await ctx.send("Please supply a valid game name.")
+		
+@bot.command(brief="Sets yourself as wanting (or not wanting) reminders for the specified game.", help="Sets yourself as wanting (or not wanting) reminders for the specified game, sent to you at 12, 6, 3 and 1 hours before turn autohosting if your turn has not been submitted. Requires having used ?claim to properly claim a nation. Use on or off as argument following command to set reminders on or off, or don't add the argument to toggle your current state.")
+async def reminders(ctx, setting=None):
+	global games
+	if setting is not None:
+		if setting == 'on':
+		else setting == 'off':
+	else:
+		# assume they want to toggle it
+		
 
 p_gamename = re.compile("Status for '(.+)'", re.IGNORECASE)
 p_gameinfo = re.compile('turn (-?\d+), era (\d), mods (\d+), turnlimit (\d+)')
@@ -294,9 +384,22 @@ def parsedatafile(statusdump):
 	return game_info, nation_status
 	
 # actual function for sending reminders
-# TODO: write this
-async def send_reminders(hour):
-	
+async def send_reminders(game_name, hour):
+	global games
+	for user_id in games[game_name][player_reminders]:
+		if user_id in games[game_name]['players'].values():
+			for nation in games[game_name]['players']:
+				if user_id == games[game_name]['players'][nation]:
+					# TODO: check if nation has taken its turn yet
+					# send the message
+					user = bot.get_user(user_id)
+					if user is not None:
+						if user.dm_channel is None:
+							await user.create_dm()
+						dm = user.dm_channel
+						await dm.send('This is your ' + hour + ' hour reminder for ' + game_name + ' as ' + nation + "; don't forget to get your turn in!")
+					else:
+						print("Error: User with ID " + str(id) + " not found")
 		
 # loop for checking each game and reminding registered players that a turn will be processed in 12, 6, 3 and 1 hours
 # MAKE SURE IT ONLY RUNS ONCE PER PERIOD
@@ -308,19 +411,19 @@ async def reminder_loop():
 		if games[game_name]['next_autohost_time'] is not None:
 			if games[game_name]['reminders'] == 0 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=12): 
 				# 12-hour reminder
-				send_reminders(12)
+				send_reminders(game_name, 12)
 				reminders = 1
 			elif games[game_name]['reminders'] == 1 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=6): 
 				# 6 hour reminder
-				send_reminders(6)
+				send_reminders(game_name, 6)
 				reminders = 2
 			elif games[game_name]['reminders'] == 2 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=3): 
 				# 3 hour reminder
-				send_reminders(3)
+				send_reminders(game_name, 3)
 				reminders = 3
 			elif games[game_name]['reminders'] == 3 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=1): 
 				# 1 hour reminder
-				send_reminders(1)
+				send_reminders(game_name, 1)
 				reminders = 4
 
 @tasks.loop(seconds=10.0)
