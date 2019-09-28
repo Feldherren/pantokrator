@@ -529,9 +529,11 @@ async def status(ctx, name=None):
 			if games[game]['next_autohost_time'] is not None:
 				time_left = str(games[game]['next_autohost_time'] - datetime.now())
 				next_autohost_str = "Next turn in approximately: " + time_left
-				game_details.append(next_autohost_str)
+			else:
+				next_autohost_str = "Next turn in approximately: UNKNOWN"
+			game_details.append(next_autohost_str)
 			if games[game]['paused']:
-				game_details.append("PAUSED")
+				game_details.append("GAME PAUSED")
 			# the below are 3, 4, 5 in result
 			# has not taken turn: 1 0 0
 			# mark as unfinished and exit: 1 0 1
