@@ -478,7 +478,7 @@ async def check_active_games():
 							await user.create_dm()
 						dm = user.dm_channel
 						await dm.send(game_name + ' just generated a new turn!')
-						games[game_name]['reminders'] = 12 # so it doesn't spam reminders
+						games[game_name]['reminders'] = REMINDER_HOURS[0] # so it doesn't spam reminders
 					else:
 						print("Error: User with ID " + str(id) + " not found")
 				games[game]['turn'] = game_info['turn']
