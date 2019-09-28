@@ -176,6 +176,8 @@ async def add(ctx, game_name):
 			games[game_name]['next_reminder'] = 12
 			games[game_name]['player_reminders'] = []
 			games[game_name]['players'] = {}
+			games[game_name]['next_autohost_time'] = None
+			games[game_name]['paused'] = False
 			await ctx.send(game_name + " is now listed as an active game, and available for use with commands.")
 			save_data(DATAFILE)
 		else:
@@ -201,6 +203,7 @@ async def pause(ctx, game_name=None):
 		shutil.copyfile(DOMCMD_PATH+'pause', os.path.join(SAVEDIR,game_name,'domcmd')
 		await ctx.send(game_name + " is now paused.")
 		games[game_name]['next_autohost_time'] = None
+		games[game_name]['paused'] = True
 		save_data(DATAFILE)
 	else:
 		await ctx.send(game_name + " isn't an active game.")
@@ -212,6 +215,8 @@ async def unpause(ctx, game_name=None):
 	if game_name in games:
 		shutil.copyfile(DOMCMD_PATH+'unpause', os.path.join(SAVEDIR,game_name,'domcmd')
 		await ctx.send(game_name + " is now unpaused.")
+		games[game_name]['paused'] = False
+		save_data(DATAFILE)
 	else:
 		await ctx.send(game_name + " isn't an active game.")
 
@@ -521,11 +526,12 @@ async def status(ctx, name=None):
 			turn = 'Turn ' + str(game_info['turn']) + ' (Year ' + year + ', ' + season_string + ')'
 			game_details = ['**'+game+'**', '*'+turn+'*']
 			time_left = None
-			if 'next_autohost_time' in games[game].keys():
-				if games[game]['next_autohost_time'] is not None:
-					time_left = str(games[game]['next_autohost_time'] - datetime.now())
-					next_autohost_str = "Next turn in approximately: " + time_left
-					game_details.append(next_autohost_str)
+			if games[game]['next_autohost_time'] is not None:
+				time_left = str(games[game]['next_autohost_time'] - datetime.now())
+				next_autohost_str = "Next turn in approximately: " + time_left
+				game_details.append(next_autohost_str)
+			if games[game]['paused']:
+				game_details.append("PAUSED")
 			# the below are 3, 4, 5 in result
 			# has not taken turn: 1 0 0
 			# mark as unfinished and exit: 1 0 1
