@@ -195,16 +195,20 @@ async def remove(ctx, game_name):
 
 @commands.is_owner()
 @bot.command(brief="Pauses the autohost timer for the specified game.", help="Pauses the autohost timer for the specified game.")
-async def pause(ctx, game_name):
+async def pause(ctx, game_name=None):
+	global games
 	if game_name in games:
 		shutil.copyfile(DOMCMD_PATH+'pause', os.path.join(SAVEDIR,game_name,'domcmd')
 		await ctx.send(game_name + " is now paused.")
+		games[game_name]['next_autohost_time'] = None
+		save_data(DATAFILE)
 	else:
 		await ctx.send(game_name + " isn't an active game.")
 
 @commands.is_owner()
 @bot.command(brief="Unpauses the autohost timer for the specified game.", help="Unpauses the autohost timer for the specified game.")
-async def unpause(ctx, game_name):
+async def unpause(ctx, game_name=None):
+	global games
 	if game_name in games:
 		shutil.copyfile(DOMCMD_PATH+'unpause', os.path.join(SAVEDIR,game_name,'domcmd')
 		await ctx.send(game_name + " is now unpaused.")
@@ -492,24 +496,19 @@ async def before_check_loop():
 	await bot.wait_until_ready()
 	reminder_loop.start()
 				
-# TODO: remove references to current_game
-@bot.command(brief="Outputs game status", help="Outputs game status, including current turn, predicted autohost and nation status.")
+@bot.command(brief="Outputs game status for provided", help="Outputs game status, including current turn, predicted autohost and nation status.")
 async def status(ctx, name=None):
 	global games
 	game = None
 	if name is not None:
-		game_name = "".join(c for c in name if c.isalnum() or c in KEEPCHARACTERS).rstrip()
 		if os.path.exists(os.path.join(SAVEDIR, game_name)):
 			game = game_name
 		else:
 			await ctx.send("No game called " + game_name + " found")
 			return
 	else:
-		if games['current_game'] is not None:
-			game = games['current_game']
-		else:
-			await ctx.send("No game set; please set a game using !setgame first")
-			return
+		await ctx.send("Please supply a valid game name.")
+		return
 	# and now the actual command stuff
 	if game is not None:
 		# TODO: check if the file changed since last read
@@ -521,13 +520,12 @@ async def status(ctx, name=None):
 			season_string = seasons[int(game_info['turn'])%12]
 			turn = 'Turn ' + str(game_info['turn']) + ' (Year ' + year + ', ' + season_string + ')'
 			game_details = ['**'+game+'**', '*'+turn+'*']
-			if game == games['current_game']:
-				time_left = None
-				if 'next_autohost_time' in games[games['current_game']].keys():
-					if games[games['current_game']]['next_autohost_time'] is not None:
-						time_left = str(games[games['current_game']]['next_autohost_time'] - datetime.now())
-						next_autohost_str = "Next turn in approximately: " + time_left
-						game_details.append(next_autohost_str)
+			time_left = None
+			if 'next_autohost_time' in games[game].keys():
+				if games[game]['next_autohost_time'] is not None:
+					time_left = str(games[game]['next_autohost_time'] - datetime.now())
+					next_autohost_str = "Next turn in approximately: " + time_left
+					game_details.append(next_autohost_str)
 			# the below are 3, 4, 5 in result
 			# has not taken turn: 1 0 0
 			# mark as unfinished and exit: 1 0 1
