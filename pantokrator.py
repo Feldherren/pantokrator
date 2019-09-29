@@ -20,6 +20,7 @@ import shutil
 #	TODO: means of setting/resetting turn estimate, in case I extend it (me-only)
 #	TODO: means of marking someone as AI-controlled, since the bot can't read that (me-only)
 #	TODO: replaced whitespace generics in p_nationstatus with \t for tabs; make sure that still works AND picks up t'ien chi, tir na n'og and anything else with apostrophes and/or spaces
+#	TODO: means of starting games from the bot
 
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
 
