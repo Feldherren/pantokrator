@@ -568,7 +568,7 @@ def get_nation_status(g, n):
 				state = 'UNFINISHED'
 			elif nation_status[n][5] == '2':
 				state = 'turn submitted'
-		output = g + ': ' + state
+		output = "__" + g + "__" + ': ' + state
 		return output
 			
 @bot.command(brief="Outputs game statuses for user", help="Outputs personal game statuses for games the user is involved in and has claimed nations, and how many people have not submitted their turn, including the user.")
