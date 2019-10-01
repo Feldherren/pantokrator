@@ -20,7 +20,7 @@ import shutil
 #	TODO: means of starting games from the bot
 #	TODO: let players set their own reminder hours
 #	TODO: shorthand status for user of status command only; list the games they're in and their status (and how many others haven't taken turns)
-#	TODO: change parsedatafile() to use nation ID for nationstatus, not nation name?
+#	TODO: change parsedata() to use nation ID for nationstatus, not nation name?
 
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
 # TODO: work out how to set/handle 'on_command_error' to tell people they can't use a thing due to privileges.
@@ -290,16 +290,16 @@ async def unclaim(ctx, game_name, nation):
 			if nation is not None:
 				# converting string into an int, or lower-case string
 				if represents_int(nation):
-					nation = int(nation)
+					n = int(nation)
 				else:
-					nation = nation.lower()
-				if nation in NATIONS_ALL_VALID_ALIASES:
+					n = nation.lower()
+				if n in NATIONS_ALL_VALID_ALIASES:
 					player = get_nick_or_name(ctx.author)
-					if nation in games[game_name]['players']:
+					if NATIONS_ALL_VALID_ALIASES[n] in games[game_name]['players']:
 						user_id = ctx.author.id
-						if games[game_name]['players'][nation] == user_id:
+						if games[game_name]['players'][NATIONS_ALL_VALID_ALIASES[n]] == user_id:
 							games[game_name]['players'].pop(NATIONS_ALL_VALID_ALIASES[nation])
-							await ctx.send(get_username_from_id(user_id) + " has removed their claim on nation " + NATIONS_ALL_VALID_ALIASES[nation] + " in the game " + game_name)
+							await ctx.send(get_username_from_id(user_id) + " has removed their claim on nation " + NATIONS_ALL_VALID_ALIASES[n] + " in the game " + game_name)
 							save_data(DATAFILE)
 						else:
 							await ctx.send("That nation is claimed, but you don't seem to own it.")
@@ -473,7 +473,6 @@ async def check_active_games():
 					else:
 						print("Error: User with ID " + str(id) + " not found")
 				games[game_name]['turn'] = game_info['turn']
-				games[game_name]['turn'] = game_info['turn']
 				save_data(DATAFILE)
 
 @check_active_games.before_loop
@@ -512,7 +511,7 @@ def get_status(gamename):
 		# AI: no indicator?
 		# defeated: -2 0 0
 		for nation in sorted(nation_status):
-			print(nation) # this is the NAME of the nation
+			print(nation) # this is the ID of the nation
 			if game_info['turn'] == -1:
 				if nation_status[nation][3] == '1':
 					state = 'CLAIMED'
@@ -526,6 +525,7 @@ def get_status(gamename):
 					state = 'UNFINISHED'
 				elif nation_status[nation][5] == '2':
 					state = 'turn submitted'
+			#game_details.append("__" + NATIONS_ALL_VALID_ALIASES[nation] + "__" + ": " + state) # in case tir na n'og and its ilk cause issues
 			game_details.append("__" + nation + "__" + ": " + state)
 		output = '\n'.join(game_details)
 		return output
@@ -547,6 +547,45 @@ async def status(ctx, game_name=None):
 			if os.path.exists(os.path.join(SAVEDIR, game)):
 				output = get_status(game)
 				await ctx.send(output)
+				
+def get_nation_status(g, n):
+	global games
+	statusdump = os.path.join(SAVEDIR, g, "statusdump.txt")
+	output = None
+	if os.path.exists(statusdump):
+		game_info, nation_status = parsedatafile(statusdump)
+		#nation_status[n]
+		if game_info['turn'] == -1:
+			if nation_status[n][3] == '1':
+				state = 'CLAIMED'
+			else:
+				state = 'FREE'
+		else:
+			state = 'WAITING'
+			if nation_status[n][3] == '-2':
+				state = '~~defeated~~'
+			elif nation_status[n][5] == '1':
+				state = 'UNFINISHED'
+			elif nation_status[n][5] == '2':
+				state = 'turn submitted'
+		output = g + ': ' + state
+		return output
+			
+@bot.command(brief="Outputs game statuses for user", help="Outputs personal game statuses for games the user is involved in and has claimed nations, and how many people have not submitted their turn, including the user.")
+async def mystatus(ctx):
+	global games
+	user_id = ctx.author.id
+	for game_name in games:
+		statuses = []
+		for nation in games[game_name]['players']:
+			if games[game_name]['players'][nation] == user_id:
+				#game_nation = NATIONS_ALL_VALID_ALIASES[nation]
+				statuses.append(get_nation_status(game_name, nation))
+		output = '\n'.join(statuses)
+		if len(output) > 0:
+			await ctx.send(output)
+		else:
+			await ctx.send("I can't find any games you're in; remember to claim your nations!")
 			
 check_active_games.start()
 bot.run(TOKEN, bot=True)
