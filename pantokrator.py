@@ -14,16 +14,19 @@ import shutil
 # requires: claiming a nation for the game (spelled correctly or recognisable through the dict below), and opting in to reminders
 # independent of watch status, as someone might want one without the other.
 #	TODO: make sure reminder_loop starts properly and runs
-#	TODO: see if on_command_error needs to be set for me-only commands
-#	TODO: means of setting/resetting turn estimate, in case I extend it (me-only)
+#	TODO: means of setting/resetting turn estimate, in case I extend it (me-only) Temporarily, pausing and unpausing the game will reset it all back to 24 hours, both in-game and on the bot.
 #	TODO: means of marking someone as AI-controlled, since the bot can't read that (me-only)
 #	TODO: replaced whitespace generics in p_nationstatus with \t for tabs; make sure that still works AND picks up t'ien chi, tir na n'og and anything else with apostrophes and/or spaces
 #	TODO: means of starting games from the bot
+#	TODO: let players set their own reminder hours
+#	TODO: shorthand status for user of status command only; list the games they're in and their status (and how many others haven't taken turns)
+#	TODO: change parsedatafile() to use nation ID for nationstatus, not nation name?
 
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
+# TODO: work out how to set/handle 'on_command_error' to tell people they can't use a thing due to privileges.
 
 TOKEN = ''
-SYMBOL = '?'
+SYMBOL = ''
 
 bot = commands.Bot(command_prefix=commands.when_mentioned_or(SYMBOL))
 
@@ -38,13 +41,13 @@ global games
 games = {}
 
 seasons = {0: 'early spring', 1: 'spring', 2:'late spring', 3:'early summer', 4:'summer', 5:'late summer', 6:'early fall', 7:'fall', 8:'late fall', 9:'early winter', 10:'winter', 11:'late winter'}
-NATIONS_EARLY_IDS = [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31,32,36,37,38,39,40]
-NATIONS_EARLY = {'arcoscephale':5, 'arco':5, 'ermor':6, 'ulm':7, 'marverni':8, 'sauromatia':9, "t'ien chi'":10, "t'ien":10, 'tien chi':10, 'tien':10, 'machaka':11, 'mictlan':12, 'abysia':13, 'caelum':14, "c'tis":15, 'ctis':15, 'pangaea':16, 'agartha':17, "tir na n'og":18, 'tir na nog':18, 'tir':18, 'fomoria':19, 'vanheim':20, 'helheim':21, 'niefelheim':22, 'rus':24, 'kailasa':25, 'lanka':26, 'yomi':27, 'hinnom':28, 'ur':29, 'berytos':30, 'xibalba':31, 'mekone':32, 'atlantis':36, "r'lyeh":37, 'rlyeh':37, 'pelagia':38, 'oceania':39, 'therodos':40}
-NATIONS_MID_IDS = [43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,73,74,75,76,77]
-NATIONS_MID = {'arcoscephale':43, 'arco':43, 'ermor':44, 'sceleria':45, 'pythium':46, 'man':47, 'eriu':48, 'ulm':49, 'marignon':50, 'mictlan':51, "t'ien chi'":52, "t'ien":52, 'tien chi':52, 'tien':52, 'machaka':53, 'agartha':54, 'abysia':55, 'caelum':56, "c'tis":57, 'ctis':57, 'pangaea':58, 'asphodel': 59, 'vanheim':60, 'jotunheim':61, 'vanarus':62, 'bandar log':63, 'bandar':63, 'shinuyama':64, 'ashdod':65, 'uruk':66, 'nazca':67, 'xibalba':68, 'phlegra':69, 'phaeacia':70, 'atlantis':73, "r'lyeh":74, 'rlyeh':74, 'pelagia':75, 'oceania':76, 'ys':77}
-NATIONS_LATE_IDS = [80,81,82,83,84,85,86,87,89,90,91,92,93,94,95,96,97,98,99,100,101,102,106,107,108]
-NATIONS_LATE = {'arcoscephale':80, 'arco':80, 'pythium':81, 'lemuria':82, 'man':83, 'ulm':84, 'marignon':85, 'mictlan':86, "t'ien chi'":87, "t'ien":87, 'tien chi':87, 'tien':87, 'jomon':89, 'agartha':90, 'abysia':91, 'caelum':92, "c'tis":93, 'ctis':93, 'pangaea':94, 'midgard':95, 'utgard':96, 'bogarus':97, 'patala':98, 'gath':99, 'ragha':100, 'xibalba':101, 'phlegra':102, 'atlantis':106, "r'lyeh":107, 'rlyeh':107, 'erytheia':108}
-NATIONS_ALL_IDS = []
+# NATIONS_EARLY_IDS = [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31,32,36,37,38,39,40]
+# NATIONS_EARLY = {'arcoscephale':5, 'arco':5, 'ermor':6, 'ulm':7, 'marverni':8, 'sauromatia':9, "t'ien chi'":10, "t'ien":10, 'tien chi':10, 'tien':10, 'machaka':11, 'mictlan':12, 'abysia':13, 'caelum':14, "c'tis":15, 'ctis':15, 'pangaea':16, 'agartha':17, "tir na n'og":18, 'tir na nog':18, 'tir':18, 'fomoria':19, 'vanheim':20, 'helheim':21, 'niefelheim':22, 'rus':24, 'kailasa':25, 'lanka':26, 'yomi':27, 'hinnom':28, 'ur':29, 'berytos':30, 'xibalba':31, 'mekone':32, 'atlantis':36, "r'lyeh":37, 'rlyeh':37, 'pelagia':38, 'oceania':39, 'therodos':40}
+# NATIONS_MID_IDS = [43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,73,74,75,76,77]
+# NATIONS_MID = {'arcoscephale':43, 'arco':43, 'ermor':44, 'sceleria':45, 'pythium':46, 'man':47, 'eriu':48, 'ulm':49, 'marignon':50, 'mictlan':51, "t'ien chi'":52, "t'ien":52, 'tien chi':52, 'tien':52, 'machaka':53, 'agartha':54, 'abysia':55, 'caelum':56, "c'tis":57, 'ctis':57, 'pangaea':58, 'asphodel': 59, 'vanheim':60, 'jotunheim':61, 'vanarus':62, 'bandar log':63, 'bandar':63, 'shinuyama':64, 'ashdod':65, 'uruk':66, 'nazca':67, 'xibalba':68, 'phlegra':69, 'phaeacia':70, 'atlantis':73, "r'lyeh":74, 'rlyeh':74, 'pelagia':75, 'oceania':76, 'ys':77}
+# NATIONS_LATE_IDS = [80,81,82,83,84,85,86,87,89,90,91,92,93,94,95,96,97,98,99,100,101,102,106,107,108]
+# NATIONS_LATE = {'arcoscephale':80, 'arco':80, 'pythium':81, 'lemuria':82, 'man':83, 'ulm':84, 'marignon':85, 'mictlan':86, "t'ien chi'":87, "t'ien":87, 'tien chi':87, 'tien':87, 'jomon':89, 'agartha':90, 'abysia':91, 'caelum':92, "c'tis":93, 'ctis':93, 'pangaea':94, 'midgard':95, 'utgard':96, 'bogarus':97, 'patala':98, 'gath':99, 'ragha':100, 'xibalba':101, 'phlegra':102, 'atlantis':106, "r'lyeh":107, 'rlyeh':107, 'erytheia':108}
+# NATIONS_ALL_IDS = []
 NATIONS_ALL_VALID_ALIASES = {
 5:"Arcoscephale", 43:"Arcoscephale", 80:"Arcoscephale", 'arco':'Arcoscephale', 'arcoscephale':'Arcoscephale', 
 6:"Ermor", 44:"Ermor", 'ermor':'Ermor', 
@@ -192,6 +195,8 @@ async def unpause(ctx, game_name=None):
 		shutil.copyfile(DOMCMD_PATH+'unpause', os.path.join(SAVEDIR,game_name,'domcmd'))
 		await ctx.send(game_name + " is now unpaused.")
 		games[game_name]['paused'] = False
+		games[game_name]['next_autohost_time'] = datetime.now() + timedelta(hours=games[game_name]['autohost_interval'])
+		games[game_name]['reminders'] = games[game_name]['reminder_hours'][0] # so it doesn't spam reminders
 		save_data(DATAFILE)
 	else:
 		await ctx.send(game_name + " isn't an active game.")
@@ -251,7 +256,7 @@ def represents_int(s):
         return False
 		
 # when comparing with the statusdump.txt content for checking if to remind someone, also use that
-@bot.command(brief="Claim a nation for your own in the named game.", help="Claim a nation for yourself, in the named game. Note that this doesn't verify you entered a real nation, or something not already claimed.")
+@bot.command(brief="Claim a nation for your own in the named game.", help="Claim a nation for yourself, in the named game. Accepts nation name, some aliases for nations (ask if you want me to add more), or numerical ID.")
 async def claim(ctx, game_name=None, nation=None):
 	global games
 	if game_name is not None:
@@ -478,62 +483,70 @@ async def before_check_loop():
 	load_data(DATAFILE)
 	await bot.wait_until_ready()
 	game = discord.Game("god")
-	await bot.change_presence(status=discord.Status.idle, activity=game)
+	await bot.change_presence(status=discord.Status.online, activity=game)
 	print('Pantokrator is running!')
 	reminder_loop.start()
-				
-@bot.command(brief="Outputs game status for provided", help="Outputs game status, including current turn, predicted autohost and nation status.")
+
+def get_status(gamename):
+	global games
+	statusdump = os.path.join(SAVEDIR, gamename, "statusdump.txt")
+	if os.path.exists(statusdump):
+		game_info, nation_status = parsedatafile(statusdump)
+		year = str(int(game_info['turn'])//12)
+		season_string = seasons[int(game_info['turn'])%12]
+		turn = 'Turn ' + str(game_info['turn']) + ' (Year ' + year + ', ' + season_string + ')'
+		game_details = ['**'+gamename+'**', '*'+turn+'*']
+		time_left = None
+		if games[gamename]['next_autohost_time'] is not None:
+			time_left = str(games[gamename]['next_autohost_time'] - datetime.now())
+			next_autohost_str = "Next turn in approximately: " + time_left
+		else:
+			next_autohost_str = "Next turn in approximately: UNKNOWN"
+		game_details.append(next_autohost_str)
+		if games[gamename]['paused']:
+			game_details.append("GAME PAUSED")
+		# the below are 3, 4, 5 in result
+		# has not taken turn: 1 0 0
+		# mark as unfinished and exit: 1 0 1
+		# turn submitted: 1 0 2
+		# AI: no indicator?
+		# defeated: -2 0 0
+		for nation in sorted(nation_status):
+			print(nation) # this is the NAME of the nation
+			if game_info['turn'] == -1:
+				if nation_status[nation][3] == '1':
+					state = 'CLAIMED'
+				else:
+					state = 'FREE'
+			else:
+				state = 'WAITING'
+				if nation_status[nation][3] == '-2':
+					state = '~~defeated~~'
+				elif nation_status[nation][5] == '1':
+					state = 'UNFINISHED'
+				elif nation_status[nation][5] == '2':
+					state = 'turn submitted'
+			game_details.append("__" + nation + "__" + ": " + state)
+		output = '\n'.join(game_details)
+		return output
+	
+@bot.command(brief="Outputs game status for a single game, or all games if no name is provided", help="Outputs game status, including current turn, predicted autohost and nation status, for a single game if the name is provided, or all games if none is provided.")
 async def status(ctx, game_name=None):
 	global games
 	if game_name is not None:
-		if os.path.exists(os.path.join(SAVEDIR, game_name)):
-			# and now the actual command stuff
-			statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
-			if os.path.exists(statusdump):
-				game_info, nation_status = parsedatafile(statusdump)
-				year = str(int(game_info['turn'])//12)
-				season_string = seasons[int(game_info['turn'])%12]
-				turn = 'Turn ' + str(game_info['turn']) + ' (Year ' + year + ', ' + season_string + ')'
-				game_details = ['**'+game_name+'**', '*'+turn+'*']
-				time_left = None
-				if games[game_name]['next_autohost_time'] is not None:
-					time_left = str(games[game_name]['next_autohost_time'] - datetime.now())
-					next_autohost_str = "Next turn in approximately: " + time_left
-				else:
-					next_autohost_str = "Next turn in approximately: UNKNOWN"
-				game_details.append(next_autohost_str)
-				if games[game_name]['paused']:
-					game_details.append("GAME PAUSED")
-				# the below are 3, 4, 5 in result
-				# has not taken turn: 1 0 0
-				# mark as unfinished and exit: 1 0 1
-				# turn submitted: 1 0 2
-				# AI: no indicator?
-				# defeated: -2 0 0
-				for nation in sorted(nation_status):
-					if game_info['turn'] == -1:
-						if nation_status[nation][3] == '1':
-							state = 'CLAIMED'
-						else:
-							state = 'FREE'
-					else:
-						state = 'WAITING'
-						if nation_status[nation][3] == '-2':
-							state = '~~defeated~~'
-						elif nation_status[nation][5] == '1':
-							state = 'UNFINISHED'
-						elif nation_status[nation][5] == '2':
-							state = 'turn submitted'
-					game_details.append("__" + nation + "__" + ": " + state)
-				output = '\n'.join(game_details)
+		if game_name in games:
+			if os.path.exists(os.path.join(SAVEDIR, game_name)):
+				output = get_status(game_name)
 				await ctx.send(output)
 			else:
 				await ctx.send("Can't find statusdump.txt for " + game_name)
 		else:
 			await ctx.send("No game called " + game_name + " found")
-			return
 	else:
-		await ctx.send("Please supply a valid game name.")
+		for game in games:
+			if os.path.exists(os.path.join(SAVEDIR, game)):
+				output = get_status(game)
+				await ctx.send(output)
 			
 check_active_games.start()
 bot.run(TOKEN, bot=True)
