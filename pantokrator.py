@@ -450,7 +450,6 @@ async def reminder_loop():
 				# send_reminders(game_name, games[game_name]['next_reminder'])
 				# games[game_name]['next_reminder'] = 0
 
-# this killed it
 @tasks.loop(seconds=10.0)
 async def check_active_games():
 	global games
@@ -474,7 +473,7 @@ async def check_active_games():
 						print("Error: User with ID " + str(id) + " not found")
 				games[game_name]['turn'] = game_info['turn']
 				save_data(DATAFILE)
-
+				
 @check_active_games.before_loop
 async def before_check_loop():
 	global games
