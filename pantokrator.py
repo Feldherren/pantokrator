@@ -14,13 +14,13 @@ import shutil
 # requires: claiming a nation for the game (spelled correctly or recognisable through the dict below), and opting in to reminders
 # independent of watch status, as someone might want one without the other.
 #	TODO: make sure reminder_loop starts properly and runs
+#		apparently ain't working, according to sheez
 #	TODO: means of setting/resetting turn estimate, in case I extend it (me-only) Temporarily, pausing and unpausing the game will reset it all back to 24 hours, both in-game and on the bot.
 #	TODO: means of marking someone as AI-controlled, since the bot can't read that (me-only)
 #	TODO: replaced whitespace generics in p_nationstatus with \t for tabs; make sure that still works AND picks up t'ien chi, tir na n'og and anything else with apostrophes and/or spaces
 #	TODO: means of starting games from the bot
 #	TODO: let players set their own reminder hours
-#	TODO: shorthand status for user of status command only; list the games they're in and their status (and how many others haven't taken turns)
-#	TODO: change parsedata() to use nation ID for nationstatus, not nation name?
+#	TODO: skip command; tells the bot to set the time until next turn to 1 minute or something, then back the previous duration in hours after the turn processes, effectively skipping the rest of the turn
 
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
 # TODO: work out how to set/handle 'on_command_error' to tell people they can't use a thing due to privileges.
@@ -36,6 +36,7 @@ SAVEDIR = '/home/pi/.dominions5/savedgames'
 DOMCMD_PATH = '/home/pi/.dominions5/domcmd-'
 DATAFILE = 'pantokrator-data'
 DEFAULT_REMINDER_HOURS = [12, 6, 3, 1]
+DEFAULT_AUTOHOST_HOURS = 24
 KEEPCHARACTERS = ['_', '-']
 global games
 games = {}
@@ -151,6 +152,7 @@ async def add(ctx, game_name):
 			game_info, nation_status = parsedatafile(statusdump)
 			current_turn = game_info['turn']
 			games[game_name]['turn'] = current_turn
+			games[game_name]['autohost_interval'] = DEFAULT_AUTOHOST_HOURS
 			games[game_name]['next_reminder'] = 12
 			games[game_name]['reminder_hours'] = DEFAULT_REMINDER_HOURS
 			games[game_name]['player_reminders'] = []
@@ -375,7 +377,12 @@ async def reminders(ctx, game_name=None, setting=None):
 		else:
 			await ctx.send(game_name + " not found in games list; please supply a valid game name.")
 	else:
-		await ctx.send("Please supply a valid game name.")
+		reminder_list = ['Receiving reminders for:']
+		for game_name in games:
+			if user_id in games[game_name]['player_reminders']:
+				reminder_list.append(game_name)
+		if len(reminder_list) > 1:
+			await ctx.send("\n".join(reminder_list))
 
 p_gamename = re.compile("Status for '(.+)'", re.IGNORECASE)
 p_gameinfo = re.compile('turn (-?\d+), era (\d), mods (\d+), turnlimit (\d+)')
@@ -422,33 +429,23 @@ async def send_reminders(game_name, hour):
 							print("Error: User with ID " + str(id) + " not found")
 		
 # loop for checking each game and reminding registered players that a turn will be processed in 12, 6, 3 and 1 hours
+# why am I checking if next_reminder is in reminder_hours? In case it gets changed?
+# should it be games[game_name]['next_autohost_time'] - datetime.now() < timedelta(hours=games[game_name]['next_reminder']) instead?
+#games[game_name]['next_reminder'] in games[game_name]['reminder_hours'] and 
 @tasks.loop(seconds=60.0)
 async def reminder_loop():
 	global games
 	for game_name in games:
 		if games[game_name]['next_autohost_time'] is not None:
-			if games[game_name]['next_reminder'] in games[game_name]['reminder_hours'] and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=games[game_name]['next_reminder']):
+			if games[game_name]['next_autohost_time'] - datetime.now() < timedelta(hours=games[game_name]['next_reminder']):
 				await send_reminders(game_name, games[game_name]['next_reminder'])
-				if len(games[game_name]['reminder_hours']) > games[game_name]['reminder_hours'].index(games[game_name]['next_reminder'])+1:
-					games[game_name]['next_reminder'] = games[game_name]['reminder_hours'][games[game_name]['reminder_hours'].index(games[game_name]['next_reminder'])+1]
+				if games[game_name]['next_reminder'] in games[game_name]['reminder_hours']:
+					if len(games[game_name]['reminder_hours']) > games[game_name]['reminder_hours'].index(games[game_name]['next_reminder'])+1:
+						games[game_name]['next_reminder'] = games[game_name]['reminder_hours'][games[game_name]['reminder_hours'].index(games[game_name]['next_reminder'])+1]
+					else:
+						games[game_name]['next_reminder'] = 0
 				else:
-					games[game_name]['next_reminder'] = 0
-			# if games[game_name]['next_reminder'] == 12 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=12): 
-				# # 12-hour reminder
-				# send_reminders(game_name, games[game_name]['next_reminder'])
-				# games[game_name]['next_reminder'] = 6
-			# elif games[game_name]['next_reminder'] == 6 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=6): 
-				# # 6 hour reminder
-				# send_reminders(game_name, games[game_name]['next_reminder'])
-				# games[game_name]['next_reminder'] = 3
-			# elif games[game_name]['next_reminder'] == 3 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=3): 
-				# # 3 hour reminder
-				# send_reminders(game_name, games[game_name]['next_reminder'])
-				# games[game_name]['next_reminder'] = 1
-			# elif games[game_name]['next_reminder'] == 1 and games[game_name]['next_autohost_time'] - datetime.now() > timedelta(hours=1): 
-				# # 1 hour reminder
-				# send_reminders(game_name, games[game_name]['next_reminder'])
-				# games[game_name]['next_reminder'] = 0
+					games[game_name]['next_reminder'] = 0 # because it can't find the last reminder in the list, it doesn't know where to go next.
 
 @tasks.loop(seconds=10.0)
 async def check_active_games():
