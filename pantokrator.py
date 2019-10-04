@@ -316,25 +316,29 @@ async def unclaim(ctx, game_name, nation):
 	else:
 		await ctx.send("Please supply a valid game name.")
 	
+async def get_who(ctx, game_name):
+	global games
+	output = ["**" + game_name + "**"]
+	for nation in sorted(games[game_name]['players']):
+		output.append(nation + ": " + get_username_from_id(games[game_name]['players'][nation]))
+	if len(output) >= 2:
+		await ctx.send("\n".join(output))
+	else:
+		await ctx.send("**" + game_name + "**: no nations claimed by players")
+	
+	
 # WHOIS?
 @bot.command(brief="Lists claimed nations and players in named game.", help="Lists players who have claimed a nation in the named game.")
 async def who(ctx, game_name=None):
 	global games
-	output = []
 	if game_name is not None:
 		if game_name in games:
-			if 'players' in games[game_name].keys():
-				for nation in sorted(games[game_name]['players']):
-					output.append(nation + ": " + get_username_from_id(games[game_name]['players'][nation]))
-			if len(output) >= 1:
-				whois = "\n".join(output)
-				await ctx.send(whois)
-			else:
-				await ctx.send("No nations have been claimed in this game, yet; have someone use the claim command to start using this.")
+			await get_who(ctx, game_name)
 		else:
 			await ctx.send(game_name + " not found in games list; please supply a valid game name.")
 	else:
-		await ctx.send("Please supply a valid game name.")
+		for game in games:
+			await get_who(ctx, game)
 
 @commands.is_owner()
 @bot.command(brief="Sets autohost interval for the specified game.", help="Sets autohost interval used by bot to predict time until next autohost.")
