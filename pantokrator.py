@@ -24,6 +24,8 @@ import shutil
 
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
 # TODO: work out how to set/handle 'on_command_error' to tell people they can't use a thing due to privileges.
+# TODO: map list? Steam stores maps at SteamLibrary\steamapps\workshop\content\722060, work out where the pi stores them; should just be able to copy over
+# TODO: AI nations list, and override for status command
 
 TOKEN = ''
 SYMBOL = ''
@@ -505,14 +507,18 @@ def get_status(gamename):
 		if games[gamename]['paused']:
 			game_details.append("GAME PAUSED")
 		# the below are 3, 4, 5 in result
-		# has not taken turn: 1 0 0
-		# mark as unfinished and exit: 1 0 1
-		# turn submitted: 1 0 2
-		# AI: no indicator?
-		# defeated: -2 0 0
+		# has not taken turn: x x 0
+		# mark as unfinished and exit: x x 1
+		# turn submitted: x x 2
+		# defeated THIS TURN: -2 x x (only THIS TURN; afterwards they're just automatically marked turn-submitted
+		# defeated: -1 x x
+		# AI: x 2 x
+		# so first number is their status in the game
+		# second number is whether they're human or not (is AI from the start a different indicator?)
+		# third number is turn status
 		for nation in sorted(nation_status):
-			print(nation) # this is the ID of the nation
-			if game_info['turn'] == -1:
+			print(nation) # this is the name of the nation
+			if game_info['turn'] == -1: # game hasn't started yet
 				if nation_status[nation][3] == '1':
 					state = 'CLAIMED'
 				else:
@@ -520,7 +526,11 @@ def get_status(gamename):
 			else:
 				state = 'WAITING'
 				if nation_status[nation][3] == '-2':
+					state = 'defeated'
+				elif nation_status[nation][3] == '-1':
 					state = '~~defeated~~'
+				elif nation_status[nation][4] == '2': # note: won't work for pre-game stuff, check what the state is there (and what it is when they're AI from the start)
+					state = 'AI'
 				elif nation_status[nation][5] == '1':
 					state = 'UNFINISHED'
 				elif nation_status[nation][5] == '2':
