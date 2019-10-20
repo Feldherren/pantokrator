@@ -3,45 +3,43 @@ from discord.ext import tasks, commands
 import os
 import re
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time, timezone
 import sys
 import pickle 
 import shutil
 
-# TODO: running and checking more than one game at once?
+# TODO: reminders in local time?
+# ?reminder [gamename] hh:mm [timezone]
 
-# TODO: opt-in reminder that you haven't taken your turn yet; reminders PM you at 12, 6, 3 and 1 hours before the turn is due
-# requires: claiming a nation for the game (spelled correctly or recognisable through the dict below), and opting in to reminders
-# independent of watch status, as someone might want one without the other.
-#	TODO: make sure reminder_loop starts properly and runs
-#		apparently ain't working, according to sheez
-#	TODO: means of setting/resetting turn estimate, in case I extend it (me-only) Temporarily, pausing and unpausing the game will reset it all back to 24 hours, both in-game and on the bot.
-#	TODO: means of marking someone as AI-controlled, since the bot can't read that (me-only)
-#	TODO: replaced whitespace generics in p_nationstatus with \t for tabs; make sure that still works AND picks up t'ien chi, tir na n'og and anything else with apostrophes and/or spaces
-#	TODO: means of starting games from the bot
-#	TODO: let players set their own reminder hours
-#	TODO: skip command; tells the bot to set the time until next turn to 1 minute or something, then back the previous duration in hours after the turn processes, effectively skipping the rest of the turn
+# TODO: SOMEHOW BROKE THE CHECK LOOP WHILST WORKING ON REMINDER TIME INPUT; MUST FIX
+# complained that an int had been used with concatenate on game_name, rather than a string; did the user data get saved to pantokrator-games?
+# the issue only happened after shutdown the first time
 
+# TODO: replaced whitespace generics in p_nationstatus with \t for tabs; make sure that still works AND picks up t'ien chi, tir na n'og and anything else with apostrophes and/or spaces
 # TODO: announce new turns for game(s) in specific channel(s); how to make this persistent? See if context can be pickled
 # TODO: work out how to set/handle 'on_command_error' to tell people they can't use a thing due to privileges.
-# TODO: map list? Steam stores maps at SteamLibrary\steamapps\workshop\content\722060, work out where the pi stores them; should just be able to copy over
-# TODO: AI nations list, and override for status command
+# TODO: skip command; tells the bot to set the time until next turn to 1 minute or something, then back the previous duration in hours after the turn processes, effectively skipping the rest of the turn
 
 TOKEN = ''
-SYMBOL = ''
+SYMBOL = '?'
 
 bot = commands.Bot(command_prefix=commands.when_mentioned_or(SYMBOL))
 
 description = '''Pantokrator, a Dominions 5 bot for raspberry pi and python.'''
 
-SAVEDIR = '/home/pi/.dominions5/savedgames'
+DOM5_PATH = '/home/pi/.dominions5'
 DOMCMD_PATH = '/home/pi/.dominions5/domcmd-'
-DATAFILE = 'pantokrator-data'
+DATAFILE_GAMES = 'pantokrator-games'
+DATAFILE_USERS = 'pantokrator-users'
 DEFAULT_REMINDER_HOURS = [12, 6, 3, 1]
 DEFAULT_AUTOHOST_HOURS = 24
 KEEPCHARACTERS = ['_', '-']
+TIME_FORMAT_TIMEZONE = "%H:%M %Z"
+TIME_FORMAT_NOTIMEZONE = "%H:%M"
 global games
+global users
 games = {}
+users = {}
 
 seasons = {0: 'early spring', 1: 'spring', 2:'late spring', 3:'early summer', 4:'summer', 5:'late summer', 6:'early fall', 7:'fall', 8:'late fall', 9:'early winter', 10:'winter', 11:'late winter'}
 # NATIONS_EARLY_IDS = [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,24,25,26,27,28,29,30,31,32,36,37,38,39,40]
@@ -111,22 +109,32 @@ NATIONS_ALL_VALID_ALIASES = {
 108:'Erytheia', 'erytheia':'Erytheia'
 }
 
-def save_data(f):
-	global games
-	with open(f, 'wb') as outfile:
-		pickle.dump(games, outfile)
+def save_data(datafile, data):
+	with open(datafile, 'wb') as outfile:
+		pickle.dump(data, outfile)
 		
-def load_data(f):
+def load_data():
 	global games
-	if os.path.exists(f):
-		with open(f, 'rb') as infile:
+	global users
+	if os.path.exists(DATAFILE_GAMES):
+		with open(DATAFILE_GAMES, 'rb') as infile:
+			print("Loading game data...")
 			games = pickle.load(infile)
+			print("Game data loaded!")
+	if os.path.exists(DATAFILE_USERS):
+		with open(DATAFILE_USERS, 'rb') as infile:
+			print("Loading user data...")
+			users = pickle.load(infile)
+			print("User data loaded!")
 
 @bot.command(brief="Safely shuts the bot down.", help="Safely shuts Pantokrator down.")
 @commands.is_owner()
 async def shutdown(ctx):
+	global games
+	global users
 	print('Shutdown command received')
-	save_data(DATAFILE)
+	save_data(DATAFILE_GAMES, games)
+	save_data(DATAFILE_USERS, users)
 	await ctx.send("All data saved, shutting down.")
 	await bot.close()
 	print('Shutdown complete')
@@ -147,7 +155,7 @@ async def listgames(ctx):
 async def add(ctx, game_name):
 	global games
 	# first confirm game exists
-	statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
+	statusdump = os.path.join(DOM5_PATH, 'savedgames', game_name, "statusdump.txt")
 	if os.path.exists(statusdump):
 		if game_name not in games:
 			games[game_name] = {}
@@ -162,48 +170,77 @@ async def add(ctx, game_name):
 			games[game_name]['next_autohost_time'] = None
 			games[game_name]['paused'] = False
 			await ctx.send(game_name + " is now listed as an active game, and available for use with commands.")
-			save_data(DATAFILE)
+			save_data(DATAFILE_GAMES, games)
 		else:
 			await ctx.send(game_name + " is already an active game.")
 	else:
 		await ctx.send("Can't find statusdump.txt for " + game_name + "; please make sure it's a valid game.")
+		
+@commands.is_owner()
+@bot.command(brief="Copies the provided domcmd file into a game directory.", help="Copies the named domcmd file (named domcmd-[name]) into the provided game's folder as domcmd. Note that pause and unpause have special handling that updates the bot's estimate of next autohost; this is just for custom domcmds.")
+async def domcmd(ctx, game_name=None, domcmd=None):
+	global games
+	if game_name is not None:
+		if domcmd is not None:
+			if game_name in games:
+				f = DOMCMD_PATH + domcmd
+				if os.path.exists(f):
+					shutil.copyfile(DOMCMD_PATH+domcmd, os.path.join(DOM5_PATH, 'savedgames', game_name, 'domcmd'))
+				else:
+					await ctx.send("Can't find domcmd domcmd-" + domcmd)
+			else:
+				await ctx.send(game_name + " isn't an active game.")
+		else:
+			await ctx.send("No domcmd name provided.")
+	else:
+		await ctx.send("No game name provided.")
 
 @commands.is_owner()
 @bot.command(brief="Removes named game from the list of active games.", help="Removes the named game from the list of active games. Pantokrator will stop watching games for updates.")
-async def remove(ctx, game_name):
+async def remove(ctx, game_name=None):
 	global games
-	if game_name in games:
-		games.remove(game_name)
-		save_data(DATAFILE)
+	if game_name is not None:
+		if game_name in games:
+			del games[game_name]
+			await ctx.send(game_name + " removed from list of active games.")
+			save_data(DATAFILE_GAMES, games)
+		else:
+			await ctx.send(game_name + " isn't an active game.")
 	else:
-		await ctx.send(game_name + " isn't an active game.")
+		await ctx.send("No game name provided")
 
 @commands.is_owner()
 @bot.command(brief="Pauses the autohost timer for the specified game.", help="Pauses the autohost timer for the specified game.")
 async def pause(ctx, game_name=None):
 	global games
-	if game_name in games:
-		shutil.copyfile(DOMCMD_PATH+'pause', os.path.join(SAVEDIR,game_name,'domcmd'))
-		await ctx.send(game_name + " is now paused.")
-		games[game_name]['next_autohost_time'] = None
-		games[game_name]['paused'] = True
-		save_data(DATAFILE)
+	if game_name is not None:
+		if game_name in games:
+			shutil.copyfile(DOMCMD_PATH+'pause', os.path.join(DOM5_PATH, 'savedgames',game_name,'domcmd'))
+			await ctx.send(game_name + " is now paused.")
+			games[game_name]['next_autohost_time'] = None
+			games[game_name]['paused'] = True
+			save_data(DATAFILE_GAMES, games)
+		else:
+			await ctx.send(game_name + " isn't an active game.")
 	else:
-		await ctx.send(game_name + " isn't an active game.")
+		await ctx.send("No game name provided.")
 
 @commands.is_owner()
 @bot.command(brief="Unpauses the autohost timer for the specified game.", help="Unpauses the autohost timer for the specified game.")
 async def unpause(ctx, game_name=None):
 	global games
-	if game_name in games:
-		shutil.copyfile(DOMCMD_PATH+'unpause', os.path.join(SAVEDIR,game_name,'domcmd'))
-		await ctx.send(game_name + " is now unpaused.")
-		games[game_name]['paused'] = False
-		games[game_name]['next_autohost_time'] = datetime.now() + timedelta(hours=games[game_name]['autohost_interval'])
-		games[game_name]['reminders'] = games[game_name]['reminder_hours'][0] # so it doesn't spam reminders
-		save_data(DATAFILE)
+	if game_name is not None:
+		if game_name in games:
+			shutil.copyfile(DOMCMD_PATH+'unpause', os.path.join(DOM5_PATH, 'savedgames',game_name,'domcmd'))
+			await ctx.send(game_name + " is now unpaused.")
+			games[game_name]['paused'] = False
+			games[game_name]['next_autohost_time'] = datetime.now() + timedelta(hours=games[game_name]['autohost_interval'])
+			games[game_name]['reminders'] = games[game_name]['reminder_hours'][0] # so it doesn't spam reminders
+			save_data(DATAFILE_GAMES, games)
+		else:
+			await ctx.send(game_name + " isn't an active game.")
 	else:
-		await ctx.send(game_name + " isn't an active game.")
+		await ctx.send("No game name provided.")
 
 @bot.command(brief="Starts watching an active game for updates.", help="Sets yourself as watching an active game; you will receive DMs from Pantokrator whenever it detects a new turn has been processed.")
 async def watch(ctx, game_name=None):
@@ -216,7 +253,7 @@ async def watch(ctx, game_name=None):
 			if user_id not in games[game_name]['watchers']:
 				games[game_name]['watchers'].append(user_id)
 				await ctx.send("You are now watching the game " + game_name + ", and will receive a DM whenever a new turn processes.")
-				save_data(DATAFILE)
+				save_data(DATAFILE_GAMES, games)
 			else:
 				await ctx.send("You are already watching this game, " + game_name + ".")
 	else:
@@ -232,7 +269,7 @@ async def unwatch(ctx, game_name=None):
 				if user_id in games[game_name]['watchers']:
 					games[game_name]['watchers'].remove(user_id)
 					await ctx.send("You have stopped watching the game " + game_name + ", and will not receive updates whenever a new turn processes.")
-					save_data(DATAFILE)
+					save_data(DATAFILE_GAMES, games)
 				else:
 					await ctx.send("You aren't watching the game " + game_name + ".")
 			else:
@@ -276,7 +313,7 @@ async def claim(ctx, game_name=None, nation=None):
 					user_id = ctx.author.id
 					games[game_name]['players'][NATIONS_ALL_VALID_ALIASES[nation]] = user_id
 					await ctx.send(player + " has claimed the nation " + NATIONS_ALL_VALID_ALIASES[nation] + " for the game " + game_name)
-					save_data(DATAFILE)
+					save_data(DATAFILE_GAMES, games)
 				else:
 					await ctx.send("Please supply a recognised nation; contact Feldherren to get new aliases added.")
 			else:
@@ -304,7 +341,7 @@ async def unclaim(ctx, game_name, nation):
 						if games[game_name]['players'][NATIONS_ALL_VALID_ALIASES[n]] == user_id:
 							games[game_name]['players'].pop(NATIONS_ALL_VALID_ALIASES[nation])
 							await ctx.send(get_username_from_id(user_id) + " has removed their claim on nation " + NATIONS_ALL_VALID_ALIASES[n] + " in the game " + game_name)
-							save_data(DATAFILE)
+							save_data(DATAFILE_GAMES, games)
 						else:
 							await ctx.send("That nation is claimed, but you don't seem to own it.")
 					else:
@@ -351,7 +388,7 @@ async def autohost(ctx, game_name, hours):
 			if hours is not None:
 				games[game_name]['autohost_interval'] = int(hours)
 				await ctx.send("Autohost interval is now set to " + hours + " hours.")
-				save_data(DATAFILE)
+				save_data(DATAFILE_GAMES, games)
 			else:
 				await ctx.send("Please supply a valid autohost period in hours as an integer")
 		else:
@@ -389,10 +426,130 @@ async def reminders(ctx, game_name=None, setting=None):
 				reminder_list.append(game_name)
 		if len(reminder_list) > 1:
 			await ctx.send("\n".join(reminder_list))
+		
+r_time = re.compile("^\d?\d:\d\d$")
+r_tz = re.compile("^[+-]\d?\d$")
+
+def validate_time(t):
+	errors = []
+	if t is not None:
+		if r_time.match(t):
+			s_hour, s_minute = t.split(':')
+			i_hour = int(s_hour)
+			i_minute = int(s_minute)
+			if not 0 <= i_hour <= 23:
+				errors.append("Please supply a value between 00 and 23 for hours.")
+			if not 0 <= i_minute <= 59:
+				errors.append("Please supply a value between 00 and 59 for minutes.")
+		else:
+			errors.append("Please supply time in correct format: hh:mm")
+	else:
+		errors.append("Please supply a time in correct format: hh:mm")
+	return errors
+
+def validate_timezone(tz):
+	errors = []
+	if tz is not None:
+		if r_tz.match(tz):
+			utc_difference = int(tz)
+			if not -23 <= utc_difference <= 23:
+				errors.append("Please supply a value between -23 and 23 for timezone.")
+		else:
+			errors.append("Please supply timezone in correct format: hours difference from UTC")
+	return errors
+	
+@bot.command(brief="testing command")
+@commands.is_owner()
+async def test(ctx):
+	global users
+	print(users)
+	
+# TODO: add user preferred timezone/UTC difference, and use that if none is supplied
+@bot.command(brief="Adds a preferred reminder time for you.", help="Adds a preferred reminder time for you, which applies to all games in which you've claimed at least one nation. Use time format: hh:mm. Also, provide a timezone expressed as hours difference from UTC; otherwise, it just assumes UTC.")	
+async def addreminder(ctx, t=None, tz=None):
+	global users
+	user_id = ctx.author.id
+	if user_id not in users.keys():
+		users[user_id] = {}
+	if 'reminder_times' not in users[user_id].keys():
+		users[user_id]['reminder_times'] = {}
+	# so this is getting set up properly, looks like
+	t_errors = validate_time(t)
+	tz_errors = validate_timezone(tz)
+	if len(t_errors) >= 1 or len(tz_errors) >= 1:
+		if len(t_errors) >= 1:
+			await ctx.send('\n'.join(t_errors))
+		if len(tz_errors) >= 1:
+			await ctx.send('\n'.join(tz_errors))
+		return
+	else:
+		if tz is None:
+			# assume UTC
+			reminder_timezone = timezone(timedelta(hours=0))
+		else:
+			# they provided a difference between UTC and them
+			reminder_timezone = timezone(timedelta(hours=int(tz)))
+		s_hour, s_minute = t.split(':')
+		i_hour = int(s_hour)
+		i_minute = int(s_minute)
+		reminder_time = time(hour=i_hour, minute=i_minute, tzinfo=reminder_timezone)
+		if reminder_time not in users[user_id]['reminder_times']:
+			users[user_id]['reminder_times'][reminder_time] = False
+			await ctx.send("You will now receive reminders to take your turn at " + reminder_time.strftime(TIME_FORMAT_TIMEZONE))
+			save_data(DATAFILE_USERS, users)
+		else:
+			await ctx.send("You already receive reminders at " + reminder_time.strftime(TIME_FORMAT_TIMEZONE))
+		
+# TODO: user can theoretically set the same time twice. EG. 18:00, and 19:00 -1
+@bot.command(brief="Removes a specified reminder time for you.", help="Removes the specified reminder time for you, which applies to all games in which you've claimed at least one nation. Use time format: hh:mm. Also, provide a timezone expressed as hours difference from UTC; otherwise, just assumes UTC.")	
+async def removereminder(ctx, t=None, tz=None):
+	global users
+	user_id = ctx.author.id
+	if user_id not in users:
+		users[user_id] = {}
+	if 'reminder_times' not in users[user_id]:
+		users[user_id]['reminder_times'] = {}
+	t_errors = validate_time(t)
+	tz_errors = validate_timezone(tz)
+	if len(t_errors) >= 1 or len(tz_errors) >= 1:
+		if len(t_errors) >= 1:
+			await ctx.send('\n'.join(t_errors))
+		if len(tz_errors) >= 1:
+			await ctx.send('\n'.join(tz_errors))
+		return
+	else:
+		if tz is None:
+			reminder_timezone = timezone(timedelta(hours=0))
+		else:
+			reminder_timezone = timezone(timedelta(hours=int(tz)))
+		s_hour, s_minute = t.split(':')
+		i_hour = int(s_hour)
+		i_minute = int(s_minute)
+		reminder_time = time(hour=i_hour, minute=i_minute, tzinfo=reminder_timezone)
+		if reminder_time in users[user_id]['reminder_times']:
+			del users[user_id]['reminder_times'][reminder_time]
+			await ctx.send("You will not receive reminders at " + reminder_time.strftime(TIME_FORMAT_TIMEZONE) + " any more.")
+			save_data(DATAFILE_USERS, users)
+		else:
+			await ctx.send("You don't have a reminder set for that time.")
+	
+@bot.command(brief="Lists your preferred reminder times.", help="Lists your preferred reminder times.")
+async def listreminders(ctx):
+	global users
+	user_id = ctx.author.id
+	times = ['Reminders set for: ']
+	if user_id in users:
+		if 'reminder_times' in users[user_id]:
+			for t in users[user_id]['reminder_times']:
+				times.append(t.strftime(TIME_FORMAT_TIMEZONE))
+	if len(times) > 1:
+		await ctx.send('\n'.join(times))
+	else:
+		await ctx.send("You don't seem to have any reminder times set.")
 
 p_gamename = re.compile("Status for '(.+)'", re.IGNORECASE)
 p_gameinfo = re.compile('turn (-?\d+), era (\d), mods (\d+), turnlimit (\d+)')
-p_nationstatus = re.compile("Nation\t(\d+)\t(\d+)\t(-?\d+)\t(\d+)\t(\d+)\t([\w_]+)\t([\w']+)\t(.+)$")
+p_nationstatus = re.compile("Nation\t(\d+)\t(\d+)\t(-?\d+)\t(\d+)\t(\d+)\t([\w]+)\t([\w' ]+)\t(.+)$")
 
 def parsedatafile(statusdump):
 	game_info = {}
@@ -404,63 +561,21 @@ def parsedatafile(statusdump):
 		game_info['turn'], game_info['era'], game_info['mods'], game_info['turnlimit'] = int(temp[1]), temp[2], temp[3], temp[4]
 		for i in range(2, len(lines)):
 			n = re.search(p_nationstatus, lines[i])
-			#print(n[7] + ", " + n[8])
-			#n_status = 
-			# has not taken turn: 1 0 0
-			# mark as unfinished and exit: 1 0 1
-			# turn submitted: 1 0 2
-			# AI: no indicator?
-			# defeated: -2 0 0
 			nation_status[n[7]] = n
 	return game_info, nation_status
-	
-# actual function for sending reminders
-async def send_reminders(game_name, hour):
-	global games
-	statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
-	game_info, nation_status = parsedatafile(statusdump)
-	for user_id in games[game_name]['player_reminders']:
-		if user_id in games[game_name]['players'].values():
-			for nation in games[game_name]['players']:
-				if user_id == games[game_name]['players'][nation]:
-					if nation_status[nation][5] == '0': # turn not taken
-						# send the message
-						user = bot.get_user(user_id)
-						if user is not None:
-							if user.dm_channel is None:
-								await user.create_dm()
-							dm = user.dm_channel
-							await dm.send('This is your ' + hour + ' hour reminder for ' + game_name + ' as ' + nation + "; don't forget to get your turn in!")
-						else:
-							print("Error: User with ID " + str(id) + " not found")
-		
-# loop for checking each game and reminding registered players that a turn will be processed in 12, 6, 3 and 1 hours
-# why am I checking if next_reminder is in reminder_hours? In case it gets changed?
-# should it be games[game_name]['next_autohost_time'] - datetime.now() < timedelta(hours=games[game_name]['next_reminder']) instead?
-#games[game_name]['next_reminder'] in games[game_name]['reminder_hours'] and 
-@tasks.loop(seconds=60.0)
-async def reminder_loop():
-	global games
-	for game_name in games:
-		if games[game_name]['next_autohost_time'] is not None:
-			if games[game_name]['next_autohost_time'] - datetime.now() < timedelta(hours=games[game_name]['next_reminder']):
-				await send_reminders(game_name, games[game_name]['next_reminder'])
-				if games[game_name]['next_reminder'] in games[game_name]['reminder_hours']:
-					if len(games[game_name]['reminder_hours']) > games[game_name]['reminder_hours'].index(games[game_name]['next_reminder'])+1:
-						games[game_name]['next_reminder'] = games[game_name]['reminder_hours'][games[game_name]['reminder_hours'].index(games[game_name]['next_reminder'])+1]
-					else:
-						games[game_name]['next_reminder'] = 0
-				else:
-					games[game_name]['next_reminder'] = 0 # because it can't find the last reminder in the list, it doesn't know where to go next.
 
-@tasks.loop(seconds=10.0)
+# datetime.utcnow() gives current datetime in UTC
+@tasks.loop(seconds=60.0)
 async def check_active_games():
 	global games
+	global users
+	current_date_utc = datetime.utcnow()
+	current_time = time(hour=current_date_utc.hour, minute=current_date_utc.minute, tzinfo=timezone(timedelta(hours=0)))
 	for game_name in games:
 		print("Checking " + game_name)
-		statusdump = os.path.join(SAVEDIR, game_name, "statusdump.txt")
+		statusdump = os.path.join(DOM5_PATH, 'savedgames', game_name, "statusdump.txt")
 		if os.path.exists(statusdump):
-			game_info, nation_data = parsedatafile(statusdump)
+			game_info, nation_status = parsedatafile(statusdump)
 			if game_info['turn'] != games[game_name]['turn']:
 				print("It is a new turn!")
 				games[game_name]['next_autohost_time'] = datetime.now() + timedelta(hours=games[game_name]['autohost_interval'])
@@ -472,25 +587,69 @@ async def check_active_games():
 						dm = user.dm_channel
 						await dm.send(game_name + ' just generated a new turn!')
 						games[game_name]['reminders'] = games[game_name]['reminder_hours'][0] # so it doesn't spam reminders
+						games[game_name]['last_turn_reminder_sent'] = False
 					else:
 						print("Error: User with ID " + str(id) + " not found")
 				games[game_name]['turn'] = game_info['turn']
-				save_data(DATAFILE)
-				
+				save_data(DATAFILE_GAMES, games)
+			elif game_info['turn'] != -1:
+				human_turns_submitted = 0
+				human_nations_still_playing = 0
+				for nation in nation_status:
+					if nation_status[nation][3] == '1' and nation_status[nation][4] != 2:
+						# they're not AI, and they're still not defeated
+						human_nations_still_playing = human_nations_still_playing + 1
+						if nation_status[nation][5] == '0' or nation_status[nation][5] == '1':
+							#turn not submitted or submitted but unfinished
+							user = bot.get_user(games[game_name]['players'][NATIONS_ALL_VALID_ALIASES[nation.lower()]])
+							if user is not None:
+								if user.id in users:
+									for reminder_time in users[user.id]['reminder_times']:
+										if current_time == reminder_time:
+											if user.dm_channel is None:
+												await user.create_dm()
+											dm = user.dm_channel
+											if nation_status[nation][5] == '0':
+												await dm.send("Please take your turn in " + game_name + "; it's " + reminder_time.strftime(TIME_FORMAT_NOTIMEZONE) + " and you haven't submitted a turn yet.")
+											elif nation_status[nation][5] == '1':
+												await dm.send("Please take your turn in " + game_name + "; it's " + reminder_time.strftime(TIME_FORMAT_NOTIMEZONE) + " and you haven't marked your turn as finished.")
+					if nation_status[nation][5] == '2' and nation_status[nation][4] != 2:
+						# they're human and their turn has been submitted
+						human_turns_submitted = human_turns_submitted + 1
+				if 'last_turn_reminder_sent' in games[game_name]:
+					if not games[game_name]['last_turn_reminder_sent']:
+						if human_turns_submitted == human_nations_still_playing-1:
+							# one person left
+							# identify who it is
+							for nation in nation_status:
+								if nation_status[nation][4] != '2' and nation_status[nation][3] != '-1' and nation_status[nation][5] != '2':
+									# they're not AI, they're not defeated (on a previous turn) and their turn isn't in
+									user = bot.get_user(games[game_name]['players'][NATIONS_ALL_VALID_ALIASES[nation.lower()]])
+									if user is not None:
+										if user.dm_channel is None:
+											await user.create_dm()
+										dm = user.dm_channel
+										await dm.send("Please take your turn in " + game_name + "; you're the last one remaining.")
+									else:
+										print("Error: can't identify the player connected to " + nation)
+									games[game_name]['last_turn_reminder_sent'] = True # so it doesn't spam reminders
+									save_data(DATAFILE_GAMES, games)
+									break
+									
 @check_active_games.before_loop
 async def before_check_loop():
 	global games
 	print('starting up...')
-	load_data(DATAFILE)
+	load_data()
 	await bot.wait_until_ready()
 	game = discord.Game("god")
 	await bot.change_presence(status=discord.Status.online, activity=game)
 	print('Pantokrator is running!')
-	reminder_loop.start()
+	#reminder_loop.start()
 
 def get_status(gamename):
 	global games
-	statusdump = os.path.join(SAVEDIR, gamename, "statusdump.txt")
+	statusdump = os.path.join(DOM5_PATH, 'savedgames', gamename, "statusdump.txt")
 	if os.path.exists(statusdump):
 		game_info, nation_status = parsedatafile(statusdump)
 		year = str(int(game_info['turn'])//12)
@@ -510,7 +669,8 @@ def get_status(gamename):
 		# has not taken turn: x x 0
 		# mark as unfinished and exit: x x 1
 		# turn submitted: x x 2
-		# defeated THIS TURN: -2 x x (only THIS TURN; afterwards they're just automatically marked turn-submitted
+		# still playing in game: 1 x x 
+		# defeated THIS TURN: -2 x x (only THIS TURN; afterwards they're just automatically marked turn-submitted)
 		# defeated: -1 x x
 		# AI: x 2 x
 		# so first number is their status in the game
@@ -545,7 +705,7 @@ async def status(ctx, game_name=None):
 	global games
 	if game_name is not None:
 		if game_name in games:
-			if os.path.exists(os.path.join(SAVEDIR, game_name)):
+			if os.path.exists(os.path.join(DOM5_PATH, 'savedgames', game_name)):
 				output = get_status(game_name)
 				await ctx.send(output)
 			else:
@@ -554,13 +714,14 @@ async def status(ctx, game_name=None):
 			await ctx.send("No game called " + game_name + " found")
 	else:
 		for game in games:
-			if os.path.exists(os.path.join(SAVEDIR, game)):
+			if os.path.exists(os.path.join(DOM5_PATH, 'savedgames', game)):
 				output = get_status(game)
 				await ctx.send(output)
 				
 def get_nation_status(g, n):
 	global games
-	statusdump = os.path.join(SAVEDIR, g, "statusdump.txt")
+	statusdump = os.path.join(DOM5_PATH, 'savedgames', g, "statusdump.txt")
+	print(statusdump)
 	output = None
 	if os.path.exists(statusdump):
 		game_info, nation_status = parsedatafile(statusdump)
@@ -579,7 +740,7 @@ def get_nation_status(g, n):
 			elif nation_status[n][5] == '2':
 				state = 'turn submitted'
 		output = "**" + g + "**" + ': ' + state
-		return output
+	return output
 			
 @bot.command(brief="Outputs game statuses for user", help="Outputs personal game statuses for games the user is involved in and has claimed nations, and how many people have not submitted their turn, including the user.")
 async def mystatus(ctx):
